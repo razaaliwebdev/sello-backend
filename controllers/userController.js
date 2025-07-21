@@ -7,46 +7,43 @@ import client from '../config/googleClient.js';
 import { uploadCloudinary } from '../utils/cloudinary.js';
 import fs from 'fs';
 
+
 // Register Controller
 export const register = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
+
     if (!name || !email || !password) {
       return res.status(400).json({
-        message: "All the fields are required."
+        message: "All the fields are required.",
       });
-    };
+    }
 
-    const file = req.file;
-    if (!file) {
+    if (!req.file) {
       return res.status(400).json({
-        message: "Avatar image is required."
+        message: "Avatar image is required.",
       });
-    };
+    }
 
-    const avatarUrl = await uploadCloudinary(file.path);
-
-    // Remove file from the local sever after upload
-    fs.unlinkSync(file.path);
+    // Upload from memory buffer to Cloudinary
+    const avatarUrl = await uploadCloudinary(req.file.buffer);
 
     const userAlreadyExists = await User.findOne({ email });
     if (userAlreadyExists) {
       return res.status(400).json({
-        message: "User already exists with this email"
+        message: "User already exists with this email.",
       });
-    };
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await User.create(
-      {
-        name,
-        email,
-        avatar: avatarUrl,
-        password: hashedPassword,
-        role: role === "seller" ? "seller" : "buyer",    //  Default
-      }
-    );
+    const user = await User.create({
+      name,
+      email,
+      avatar: avatarUrl,
+      password: hashedPassword,
+      role: role === "seller" ? "seller" : "buyer", // default to buyer
+    });
 
     return res.status(201).json({
       message: "User registered successfully.",
@@ -55,16 +52,16 @@ export const register = async (req, res) => {
         name: user.name,
         email: user.email,
         avatar: user.avatar,
-        role: user.role
-      }
+        role: user.role,
+      },
     });
-
   } catch (error) {
+    console.error("Register Error:", error.message);
     return res.status(500).json({
-      message: error.message
-    })
+      message: "Server error. Please try again later.",
+    });
   }
-}
+};
 
 // Login Controller
 export const login = async (req, res) => {
