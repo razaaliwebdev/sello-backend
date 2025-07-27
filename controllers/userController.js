@@ -318,7 +318,7 @@ export const googleLogin = async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.status(200).json({ jwtToken: "jwtToken" });
+    res.status(200).json({ token: jwtToken });
   } catch (err) {
     console.error("Google Login Error:", err);
     res.status(401).json({ message: "Invalid Google token" });
