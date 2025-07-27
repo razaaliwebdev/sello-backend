@@ -14,11 +14,11 @@ router.post("/forgot-password", forgotPassword);
 router.post("/verify-otp", verifyOtp);
 router.post("/reset-password", resetPassword);
 router.post("/google", googleLogin);
+router.post("/logout", logoutController);
 
 
 // Protected Routes
 router.get("/me", auth, getUserProfile);
-router.post("/logout", logoutController);
 
 
 export default router;

@@ -1,22 +1,26 @@
+import jwt from 'jsonwebtoken';
+import User from '../models/userModel.js';
 
 export const auth = async (req, res, next) => {
-    const token = req.cookies.token;
+    const authHeader = req.headers.authorization;
 
-    if (!token) {
+    
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({
-            error: "Not authorized: No Token"
+            error: "Not Authorized: No Token or Invalid Format"
         });
-    };
+    }
+
+    const token = authHeader.split(" ")[1]; // "Bearer token"
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = await User.findById(decoded.id).select("-password");
-        next();
-    } catch (error) {
-        console.log("❌ Not authorized : Tokan Failed");
-        return res.status(401).json({
-            error: "Not authorized : Tokan Invalid"
-        });
-    };
 
+        next(); // ✅ don't forget to call next()
+    } catch (error) {
+        return res.status(401).json({
+            error: "Not Authorized: Token Invalid"
+        });
+    }
 };
