@@ -312,13 +312,13 @@ export const googleLogin = async (req, res) => {
       });
     }
 
-    const jwtToken = jwt.sign(
+    const token = jwt.sign(
       { id: user._id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    res.status(200).json({ token: jwtToken });
+    res.status(200).json({ token: token });
   } catch (err) {
     console.error("Google Login Error:", err);
     res.status(401).json({ message: "Invalid Google token" });
