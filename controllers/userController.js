@@ -305,7 +305,7 @@ export const googleLogin = async (req, res) => {
       user = await User.create({
         name,
         email,
-        avatar: picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}`,
+        avatar: picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(email.charAt(0).toUpperCase())}`,
         password: 'google-auth', // placeholder
         verified: true,
         role: 'buyer'
