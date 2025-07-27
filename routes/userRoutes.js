@@ -1,6 +1,6 @@
 import express from 'express';
 import passport from "passport";
-import { forgotPassword, getUserProfile, googleLogin, login, register, resetPassword, verifyOtp } from '../controllers/userController.js';
+import { forgotPassword, getUserProfile, googleLogin, login, logoutController, register, resetPassword, verifyOtp } from '../controllers/userController.js';
 import { upload } from '../middlewares/multer.js';
 import { auth } from '../middlewares/authMiddleware.js';
 
@@ -15,8 +15,10 @@ router.post("/verify-otp", verifyOtp);
 router.post("/reset-password", resetPassword);
 router.post("/google", googleLogin);
 
+
 // Protected Routes
 router.get("/me", auth, getUserProfile);
+router.post("/logout", logoutController);
 
 
 export default router;

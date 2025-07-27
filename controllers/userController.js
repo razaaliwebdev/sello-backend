@@ -5,7 +5,6 @@ import { generateOtp } from '../utils/generateOtp.js';
 import sendEmail from '../utils/sendEmail.js';
 import client from '../config/googleClient.js';
 import { uploadCloudinary } from '../utils/cloudinary.js';
-import fs from 'fs';
 
 
 // Register Controller
@@ -356,4 +355,28 @@ export const getUserProfile = async (req, res) => {
     }
   )
 
+};
+
+// Logout Controller
+export const logoutController = async (req, res) => {
+  try {
+
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict"
+    });
+
+    return res.status(200).json({
+      message: "User Logged Out Successfully."
+    })
+
+  } catch (error) {
+    return res.status(500).json(
+      {
+        message: "Failed to Logged Out.",
+        error: error.message
+      }
+    )
+  }
 };
