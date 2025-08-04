@@ -69,7 +69,7 @@ const carSchema = new mongoose.Schema(
         },
         transmission: {
             type: String,
-            enum: ["auto", "manual"],
+            enum: ["auto", "manual", "hybird", "electric"],
         },
 
         mileage: {
@@ -81,7 +81,14 @@ const carSchema = new mongoose.Schema(
             type: [String],
             default: [],
         },
-
+        regionalSpec: {
+            type: String,
+            enum: ["GCC", "American", "Canadian", "European"],
+        },
+        bodyType: {
+            type: String,
+            enum: ["Roadster", "Cabriolet", "Super", "Micro", "Station", "Muscle", "Sports", "Targa", "Sedan", "SUV", "Hatchback", "Coupe", "Convertible", "Pickup"],
+        },
         // Location
         city: {
             type: String,
@@ -157,15 +164,15 @@ export default Car;
 
 
 
- // Basic Info
-        // title: {
-        //     type: String,
-        //     required: true,
-        //     trim: true,
-        //     maxlength: 100,
-        // },
-        // description: {
-        //     type: String,
-        //     trim: true,
-        //     maxlength: 1000,
-        // },
+// Basic Info
+// title: {
+//     type: String,
+//     required: true,
+//     trim: true,
+//     maxlength: 100,
+// },
+// description: {
+//     type: String,
+//     trim: true,
+//     maxlength: 1000,
+// },

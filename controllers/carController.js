@@ -12,7 +12,7 @@ export const createCar = async (req, res) => {
             make, model, variant, year, condition,
             price, colorExterior, colorInterior, fuelType, engineCapacity,
             transmission, mileage, features, city, location, sellerType,
-            carDoors, contactNumber, geoLocation, horsepower, warranty
+            carDoors, contactNumber, geoLocation, horsepower, warranty, regionalSpec, bodyType
         } = req.body;
 
         // Validation
@@ -63,6 +63,8 @@ export const createCar = async (req, res) => {
             geoLocation,
             horsepower,
             warranty,
+            regionalSpec,
+            bodyType,
             postedBy: req.user._id
         });
 
