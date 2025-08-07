@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Car from "../models/carModel.js";
 import { buildCarQuery } from '../utils/buildCarQuery.js';
+import { uploadCloudinary } from '../utils/cloudinary.js'
 
 
 
@@ -15,31 +16,28 @@ export const createCar = async (req, res) => {
             carDoors, contactNumber, geoLocation, horsepower, warranty, regionalSpec, bodyType
         } = req.body;
 
-        // Validation
         if (!make || !model || !year || !condition || !price || !city || !contactNumber) {
             return res.status(400).json({
-                message: "Please fill all the required fields: make, model, year, condition, price, city, contactNumber"
+                message: "Missing required fields: make, model, year, condition, price, city, contactNumber"
             });
         }
 
         if (!["used", "new"].includes(condition)) {
-            return res.status(400).json({
-                message: "Invalid condition value. Must be 'new' or 'used'."
-            });
+            return res.status(400).json({ message: "Invalid condition value. Must be 'new' or 'used'." });
         }
 
-        // ✅ Handle Image Uploads via Multer (Cloudinary returns .path as URL)
+        console.log("Received files:", req.files?.length || 0);
+
         let imageUrls = [];
-
         if (req.files && req.files.length > 0) {
-            imageUrls = req.files.map((file) => file.path);
-        } else {
-            return res.status(400).json({
-                message: "At least one image is required."
-            });
+            console.log("Uploading images...");
+            const uploadPromises = req.files.map(file => uploadCloudinary(file.buffer));
+            imageUrls = await Promise.all(uploadPromises);
+            console.log("Images uploaded.");
         }
 
-        // ✅ Create new car listing
+        console.log("Creating car...");
+
         const newCar = await Car.create({
             images: imageUrls,
             make,
@@ -68,19 +66,22 @@ export const createCar = async (req, res) => {
             postedBy: req.user._id
         });
 
+        console.log("Car created.");
+
         return res.status(201).json({
             message: "Car created successfully.",
             car: newCar
         });
 
     } catch (error) {
-        console.log("Create Car Error:", error.message);
+        console.error("Create Car Error:", error);
         return res.status(500).json({
             message: "Server error while creating car",
             error: error.message
         });
     }
 };
+
 
 // Edit Car Controller
 export const editCar = async (req, res) => {
