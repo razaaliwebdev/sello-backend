@@ -13,7 +13,8 @@ export const createCar = async (req, res) => {
             make, model, variant, year, condition,
             price, colorExterior, colorInterior, fuelType, engineCapacity,
             transmission, mileage, features, city, location, sellerType,
-            carDoors, contactNumber, geoLocation, horsepower, warranty, regionalSpec, bodyType
+            carDoors, contactNumber, geoLocation, horsepower, warranty, regionalSpec, bodyType,
+            numberOfCylinders
         } = req.body;
 
         if (!make || !model || !year || !condition || !price || !city || !contactNumber) {
@@ -63,6 +64,7 @@ export const createCar = async (req, res) => {
             warranty,
             regionalSpec,
             bodyType,
+            numberOfCylinders,
             postedBy: req.user._id
         });
 

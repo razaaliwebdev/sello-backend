@@ -146,6 +146,11 @@ const carSchema = new mongoose.Schema(
             type: Number,
             min: 0,
             required: true
+        },
+        numberOfCylinders: {
+            type: Number,
+            min: 1,
+            max: 16
         }
     },
     {
