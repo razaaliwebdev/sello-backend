@@ -151,6 +151,10 @@ const carSchema = new mongoose.Schema(
             type: Number,
             min: 1,
             max: 16
+        },
+        ownerType: {
+            type: String,
+            enum: ["owner", "dealer", "Dealership/certified Pre-Owned"]
         }
     },
     {
