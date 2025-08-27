@@ -37,7 +37,7 @@ const carSchema = new mongoose.Schema(
         condition: {
             type: String,
             required: true,
-            enum: ["new", "used"],
+            enum: ["New", "Used"],
         },
         price: {
             type: Number,
@@ -138,7 +138,7 @@ const carSchema = new mongoose.Schema(
         // New: warranty field
         warranty: {
             type: String,
-            enum: ["yes", "no", "does not apply"],
+            enum: ["Yes", "No", "Doesn't Apply"],
             required: true
         },
         // New: horsepower field
