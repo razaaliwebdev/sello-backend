@@ -69,7 +69,7 @@ const carSchema = new mongoose.Schema(
         },
         transmission: {
             type: String,
-            enum: ["Auto", "Manual"],
+            enum: ["Automatic", "Manual"],
         },
 
         mileage: {
@@ -144,7 +144,7 @@ const carSchema = new mongoose.Schema(
         // New: horsepower field
         horsepower: {
             type: String,
-            required: true
+            default: ""
         },
         numberOfCylinders: {
             type: Number,
