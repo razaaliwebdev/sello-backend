@@ -250,7 +250,6 @@ export const getSingleCar = async (req, res) => {
 };
 
 // Get Car Filter Controller
-// Controller
 export const getFilteredCars = async (req, res) => {
     try {
         const filter = buildCarQuery(req.query);
