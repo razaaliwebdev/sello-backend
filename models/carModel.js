@@ -61,7 +61,7 @@ const carSchema = new mongoose.Schema(
         // Engine & Transmission
         fuelType: {
             type: String,
-            enum: ["petrol", "diesel", "hybrid", "electric", "cng"],
+            enum: ["Petrol", "Diesel", "Hybrid", "Electric", "CNG"],
         },
         engineCapacity: {
             type: String,
@@ -69,7 +69,7 @@ const carSchema = new mongoose.Schema(
         },
         transmission: {
             type: String,
-            enum: ["auto", "manual", "hybird", "electric"],
+            enum: ["Auto", "Manual"],
         },
 
         mileage: {
@@ -153,7 +153,7 @@ const carSchema = new mongoose.Schema(
         },
         ownerType: {
             type: String,
-            enum: ["owner", "dealer", "Dealership/certified Pre-Owned"]
+            enum: ["Owner", "Dealer", "Dealership"]
         }
     },
     {
