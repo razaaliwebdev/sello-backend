@@ -17,6 +17,8 @@ export const createCar = async (req, res) => {
             numberOfCylinders, ownerType
         } = req.body;
 
+        // console.log(req.body);
+
         if (!make || !model || !year || !condition || !price || !city || !contactNumber) {
             return res.status(400).json({
                 message: "Missing required fields: make, model, year, condition, price, city, contactNumber"
@@ -84,6 +86,7 @@ export const createCar = async (req, res) => {
         });
     }
 };
+
 
 
 // Edit Car Controller

@@ -64,8 +64,8 @@ const carSchema = new mongoose.Schema(
             enum: ["petrol", "diesel", "hybrid", "electric", "cng"],
         },
         engineCapacity: {
-            type: Number,
-            min: 0,
+            type: String,
+            required: true
         },
         transmission: {
             type: String,
@@ -143,8 +143,7 @@ const carSchema = new mongoose.Schema(
         },
         // New: horsepower field
         horsepower: {
-            type: Number,
-            min: 0,
+            type: String,
             required: true
         },
         numberOfCylinders: {
