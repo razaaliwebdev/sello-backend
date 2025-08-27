@@ -25,7 +25,7 @@ export const createCar = async (req, res) => {
             });
         }
 
-        if (!["used", "new"].includes(condition)) {
+        if (!["Used", "New"].includes(condition)) {
             return res.status(400).json({ message: "Invalid condition value. Must be 'new' or 'used'." });
         }
 
