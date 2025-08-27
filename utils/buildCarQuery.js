@@ -1,16 +1,17 @@
-/**
- * Builds a MongoDB query object from query parameters
- */
+// utils/parseArray.js
+const parseArray = (val) => Array.isArray(val) ? val : val.split(",");
+
+// Builds a MongoDB query object from query parameters
 export const buildCarQuery = (query) => {
     const filter = {};
 
-    // Exact match filters
+    // Exact match / multi-select filters
     if (query.make) filter.make = query.make;
     if (query.model) filter.model = query.model;
-    if (query.condition) filter.condition = { $in: query.condition.split(",") };
-    if (query.sellerType) filter.sellerType = { $in: query.sellerType.split(",") };
-    if (query.transmission) filter.transmission = { $in: query.transmission.split(",") };
-    if (query.fuelType) filter.fuelType = { $in: query.fuelType.split(",") };
+    if (query.condition) filter.condition = { $in: parseArray(query.condition) };
+    if (query.sellerType) filter.sellerType = { $in: parseArray(query.sellerType) };
+    if (query.transmission) filter.transmission = { $in: parseArray(query.transmission) };
+    if (query.fuelType) filter.fuelType = { $in: parseArray(query.fuelType) };
     if (query.city) filter.city = { $regex: query.city, $options: "i" };
 
     // Range filters
@@ -45,21 +46,10 @@ export const buildCarQuery = (query) => {
     }
 
     // Multi-select filters
-    if (query.features) {
-        filter.features = { $all: query.features.split(",") };
-    }
-
-    if (query.colorExterior) {
-        filter.colorExterior = { $in: query.colorExterior.split(",") };
-    }
-
-    if (query.colorInterior) {
-        filter.colorInterior = { $in: query.colorInterior.split(",") };
-    }
-
-    if (query.doors) {
-        filter.carDoors = { $in: query.doors.split(",").map(Number) };
-    }
+    if (query.features) filter.features = { $in: parseArray(query.features) };
+    if (query.colorExterior) filter.colorExterior = { $in: parseArray(query.colorExterior) };
+    if (query.colorInterior) filter.colorInterior = { $in: parseArray(query.colorInterior) };
+    if (query.doors) filter.carDoors = { $in: parseArray(query.doors).map(Number) };
 
     return filter;
 };

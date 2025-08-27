@@ -250,23 +250,20 @@ export const getSingleCar = async (req, res) => {
 };
 
 // Get Car Filter Controller
+// Controller
 export const getFilteredCars = async (req, res) => {
     try {
-
         const filter = buildCarQuery(req.query);
 
-        const page = parseIn(req.query.page) || 1;
-        const limit = parseIn(req.query.limit) || 12;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 12;
         const skip = (page - 1) * limit;
 
-        const sort = req.query.sort
-            ? {
-                [req.query.sort]: req.query.order === "desc" ? -1 : 1
-            }
-            :
-            {
-                createdAt: -1
-            };
+        // Whitelist sort fields
+        const allowedSortFields = ["price", "year", "mileage", "createdAt"];
+        const sortField = allowedSortFields.includes(req.query.sort) ? req.query.sort : "createdAt";
+        const sortOrder = req.query.order === "desc" ? -1 : 1;
+        const sort = { [sortField]: sortOrder };
 
         const cars = await Car.find(filter)
             .sort(sort)
@@ -285,9 +282,7 @@ export const getFilteredCars = async (req, res) => {
         });
 
     } catch (error) {
-        console.log("Get Filtered Cars Error", error.message);
-        return res.status(500).json({
-            message: "Sever error while fetching cars"
-        })
+        console.error("Get Filtered Cars Error:", error.message);
+        return res.status(500).json({ message: "Server error while fetching cars" });
     }
 };
