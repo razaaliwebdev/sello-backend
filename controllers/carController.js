@@ -185,22 +185,39 @@ export const getMyCars = async (req, res) => {
 };
 
 
-// Get All Cars Controller
+
+// Get All Cars Controller with Pagination
 export const getAllCars = async (req, res) => {
     try {
-        const cars = await Car.find().populate("postedBy", "name email role");
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 12;
+        const skip = (page - 1) * limit;
+
+        // Fetch cars with pagination
+        const cars = await Car.find()
+            .skip(skip)
+            .limit(limit)
+            .populate("postedBy", "name email role")
+            .sort({ createdAt: -1 });
+
+        // Get total count
+        const total = await Car.countDocuments();
 
         if (!cars || cars.length === 0) {
             return res.status(200).json({
                 message: "No cars found.",
                 total: 0,
+                page,
+                pages: 0,
                 cars: []
             });
         }
 
         return res.status(200).json({
-            message: "Fetched all the cars.",
-            total: cars.length,
+            message: "Fetched cars successfully.",
+            total,
+            page,
+            pages: Math.ceil(total / limit),
             cars
         });
     } catch (error) {
@@ -211,6 +228,7 @@ export const getAllCars = async (req, res) => {
         });
     }
 };
+
 
 // Get Single Car Controller
 export const getSingleCar = async (req, res) => {
