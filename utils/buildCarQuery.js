@@ -1,55 +1,70 @@
 // utils/parseArray.js
-const parseArray = (val) => Array.isArray(val) ? val : val.split(",");
+const parseArray = (val) => {
+    if (!val) return [];
+    return Array.isArray(val) ? val : val.split(',').filter(Boolean);
+};
 
 // Builds a MongoDB query object from query parameters
 export const buildCarQuery = (query) => {
     const filter = {};
 
-    // Exact match / multi-select filters
-    if (query.make) filter.make = query.make;
-    if (query.model) filter.model = query.model;
-    if (query.condition) filter.condition = { $in: parseArray(query.condition) };
-    if (query.sellerType) filter.sellerType = { $in: parseArray(query.sellerType) };
-    if (query.transmission) filter.transmission = { $in: parseArray(query.transmission) };
-    if (query.fuelType) filter.fuelType = { $in: parseArray(query.fuelType) };
-    if (query.city) filter.city = { $regex: query.city, $options: "i" };
+    // Text search with case-insensitive matching
+    if (query.make) filter.make = { $regex: query.make, $options: 'i' };
+    if (query.model) filter.model = { $regex: query.model, $options: 'i' };
+    if (query.city) filter.city = { $regex: query.city, $options: 'i' };
 
-    // Range filters
-    if (query.priceMin || query.priceMax) {
-        filter.price = {};
-        if (query.priceMin) filter.price.$gte = Number(query.priceMin);
-        if (query.priceMax) filter.price.$lte = Number(query.priceMax);
+    // Handle multi-select filters
+    const arrayFilters = [
+        'sellerType', 'transmission', 'fuelType',
+        'features', 'colorExterior', 'colorInterior', 'bodyType',
+        'regionalSpec', 'ownerType', 'warranty'
+    ];
+    
+    // Handle condition separately since it's a single value
+    if (query.condition) {
+        filter.condition = query.condition;
     }
 
-    if (query.yearMin || query.yearMax) {
-        filter.year = {};
-        if (query.yearMin) filter.year.$gte = Number(query.yearMin);
-        if (query.yearMax) filter.year.$lte = Number(query.yearMax);
-    }
+    arrayFilters.forEach(field => {
+        if (query[field]) {
+            const values = parseArray(query[field]);
+            if (values.length > 0) {
+                filter[field] = { $in: values };
+            }
+        }
+    });
 
-    if (query.mileageMin || query.mileageMax) {
-        filter.mileage = {};
-        if (query.mileageMin) filter.mileage.$gte = Number(query.mileageMin);
-        if (query.mileageMax) filter.mileage.$lte = Number(query.mileageMax);
-    }
+    // Handle numeric range filters
+    const rangeFilters = [
+        { queryMin: 'priceMin', queryMax: 'priceMax', field: 'price' },
+        { queryMin: 'yearMin', queryMax: 'yearMax', field: 'year' },
+        { queryMin: 'mileageMin', queryMax: 'mileageMax', field: 'mileage' },
+        { queryMin: 'hpMin', queryMax: 'hpMax', field: 'horsepower' },
+        { queryMin: 'engineMin', queryMax: 'engineMax', field: 'engineCapacity' }
+    ];
 
-    if (query.hpMin || query.hpMax) {
-        filter.horsepower = {};
-        if (query.hpMin) filter.horsepower.$gte = Number(query.hpMin);
-        if (query.hpMax) filter.horsepower.$lte = Number(query.hpMax);
-    }
+    rangeFilters.forEach(({ queryMin, queryMax, field }) => {
+        const min = query[queryMin] ? Number(query[queryMin]) : null;
+        const max = query[queryMax] ? Number(query[queryMax]) : null;
 
-    if (query.engineMin || query.engineMax) {
-        filter.engineCapacity = {};
-        if (query.engineMin) filter.engineCapacity.$gte = Number(query.engineMin);
-        if (query.engineMax) filter.engineCapacity.$lte = Number(query.engineMax);
-    }
+        if (min !== null || max !== null) {
+            filter[field] = filter[field] || {};
+            if (min !== null) filter[field].$gte = min;
+            if (max !== null) filter[field].$lte = max;
+        }
+    });
 
-    // Multi-select filters
-    if (query.features) filter.features = { $in: parseArray(query.features) };
-    if (query.colorExterior) filter.colorExterior = { $in: parseArray(query.colorExterior) };
-    if (query.colorInterior) filter.colorInterior = { $in: parseArray(query.colorInterior) };
-    if (query.doors) filter.carDoors = { $in: parseArray(query.doors).map(Number) };
+    // Handle single value number filters
+    // Single value number filters
+    const numberFilters = ['carDoors', 'seats'];
+    numberFilters.forEach(field => {
+        if (query[field]) {
+            const value = Number(query[field]);
+            if (!isNaN(value)) {
+                filter[field] = value;
+            }
+        }
+    });
 
     return filter;
 };

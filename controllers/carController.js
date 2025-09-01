@@ -270,36 +270,55 @@ export const getSingleCar = async (req, res) => {
 // Get Car Filter Controller
 export const getFilteredCars = async (req, res) => {
     try {
-        const filter = buildCarQuery(req.query);
-
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 12;
+        // Validate and parse pagination parameters
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 12));
         const skip = (page - 1) * limit;
 
-        // Whitelist sort fields
+        // Build filter query
+        const filter = buildCarQuery(req.query);
+
+        // Validate and set sort parameters
         const allowedSortFields = ["price", "year", "mileage", "createdAt"];
         const sortField = allowedSortFields.includes(req.query.sort) ? req.query.sort : "createdAt";
-        const sortOrder = req.query.order === "desc" ? -1 : 1;
+        const sortOrder = req.query.order === "asc" ? 1 : -1; // Default to descending for most recent first
         const sort = { [sortField]: sortOrder };
 
-        const cars = await Car.find(filter)
-            .sort(sort)
-            .skip(skip)
-            .limit(limit)
-            .populate("postedBy", "name email");
+        // Execute queries in parallel for better performance
+        const [cars, total] = await Promise.all([
+            Car.find(filter)
+                .sort(sort)
+                .skip(skip)
+                .limit(limit)
+                .populate("postedBy", "name email")
+                .lean(),
+            Car.countDocuments(filter)
+        ]);
 
-        const total = await Car.countDocuments(filter);
+        // Calculate pagination metadata
+        const pages = Math.ceil(total / limit);
+        const hasNextPage = page < pages;
+        const hasPreviousPage = page > 1;
 
         return res.status(200).json({
+            success: true,
             count: cars.length,
             total,
             page,
-            pages: Math.ceil(total / limit),
-            data: cars
+            pages,
+            limit,
+            hasNextPage,
+            hasPreviousPage,
+            data: cars,
+            filters: Object.keys(req.query).length > 0 ? req.query : undefined
         });
 
     } catch (error) {
-        console.error("Get Filtered Cars Error:", error.message);
-        return res.status(500).json({ message: "Server error while fetching cars" });
+        console.error("Get Filtered Cars Error:", error);
+        return res.status(500).json({ 
+            success: false,
+            message: "Error fetching cars. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 };
