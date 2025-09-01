@@ -8,8 +8,8 @@ const router = express.Router();
 
 // Public Route
 router.get("/", getAllCars);
+router.get("/filter", getFilteredCars); // This needs to come before /:id
 router.get("/:id", getSingleCar);
-router.get("/filter", getFilteredCars);
 
 // Protected Routes
 router.post("/", auth, upload.array("images"), createCar);   // Create Car
