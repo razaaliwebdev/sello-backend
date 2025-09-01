@@ -7,11 +7,33 @@ const parseArray = (val) => {
 // Builds a MongoDB query object from query parameters
 export const buildCarQuery = (query) => {
     const filter = {};
+    
+    // Validate query is an object
+    if (!query || typeof query !== 'object') {
+        throw new Error('Invalid query parameters');
+    }
 
-    // Text search with case-insensitive matching
-    if (query.make) filter.make = { $regex: query.make, $options: 'i' };
-    if (query.model) filter.model = { $regex: query.model, $options: 'i' };
-    if (query.city) filter.city = { $regex: query.city, $options: 'i' };
+    // Text search with case-insensitive matching and validation
+    if (query.make) {
+        if (typeof query.make !== 'string' || query.make.trim() === '') {
+            throw new Error('Invalid make parameter');
+        }
+        filter.make = { $regex: query.make.trim(), $options: 'i' };
+    }
+    
+    if (query.model) {
+        if (typeof query.model !== 'string' || query.model.trim() === '') {
+            throw new Error('Invalid model parameter');
+        }
+        filter.model = { $regex: query.model.trim(), $options: 'i' };
+    }
+    
+    if (query.city) {
+        if (typeof query.city !== 'string' || query.city.trim() === '') {
+            throw new Error('Invalid city parameter');
+        }
+        filter.city = { $regex: query.city.trim(), $options: 'i' };
+    }
 
     // Handle multi-select filters
     const arrayFilters = [

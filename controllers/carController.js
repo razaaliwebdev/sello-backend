@@ -270,6 +270,8 @@ export const getSingleCar = async (req, res) => {
 // Get Car Filter Controller
 export const getFilteredCars = async (req, res) => {
     try {
+        console.log('Query params:', req.query);
+        
         // Validate and parse pagination parameters
         const page = Math.max(1, parseInt(req.query.page) || 1);
         const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 12));
@@ -277,6 +279,7 @@ export const getFilteredCars = async (req, res) => {
 
         // Build filter query
         const filter = buildCarQuery(req.query);
+        console.log('Built filter:', JSON.stringify(filter, null, 2));
 
         // Validate and set sort parameters
         const allowedSortFields = ["price", "year", "mileage", "createdAt"];
@@ -285,15 +288,21 @@ export const getFilteredCars = async (req, res) => {
         const sort = { [sortField]: sortOrder };
 
         // Execute queries in parallel for better performance
-        const [cars, total] = await Promise.all([
-            Car.find(filter)
-                .sort(sort)
-                .skip(skip)
-                .limit(limit)
-                .populate("postedBy", "name email")
-                .lean(),
-            Car.countDocuments(filter)
-        ]);
+        let cars, total;
+        try {
+            [cars, total] = await Promise.all([
+                Car.find(filter)
+                    .sort(sort)
+                    .skip(skip)
+                    .limit(limit)
+                    .populate("postedBy", "name email")
+                    .lean(),
+                Car.countDocuments(filter)
+            ]);
+        } catch (dbError) {
+            console.error('Database query error:', dbError);
+            throw new Error(`Database query failed: ${dbError.message}`);
+        }
 
         // Calculate pagination metadata
         const pages = Math.ceil(total / limit);
