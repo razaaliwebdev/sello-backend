@@ -73,6 +73,13 @@ export const createCar = async (req, res) => {
 
         console.log("Car created.");
 
+        // Update user's carsPosted array
+        await User.findByIdAndUpdate(
+            req.user._id,
+            { $push: { carsPosted: newCar._id } },
+            { new: true }
+        );
+
         return res.status(201).json({
             message: "Car created successfully.",
             car: newCar
