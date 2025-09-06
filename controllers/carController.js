@@ -168,21 +168,22 @@ export const deleteCar = async (req, res) => {
 // GetMyCars (My Listing) Car Controller
 export const getMyCars = async (req, res) => {
     try {
-        const cars = await Car.findOne({ postedBy: req.user._id }).sort({ created: -1 });
+        const cars = await Car.find({ postedBy: req.user._id }).sort({ createdAt: -1 });
 
         return res.status(200).json({
             message: "My Cars Fetched Successfully.",
             total: cars.length,
             cars
-        })
+        });
     } catch (error) {
-        console.log("My Cars Errors:", error.messages);
+        console.log("My Cars Errors:", error.message);
         return res.status(500).json({
             message: 'Failed to get user cars',
             error: error.message
         });
     }
 };
+
 
 
 
@@ -271,7 +272,7 @@ export const getSingleCar = async (req, res) => {
 export const getFilteredCars = async (req, res) => {
     try {
         console.log('Query params:', req.query);
-        
+
         // Validate and parse pagination parameters
         const page = Math.max(1, parseInt(req.query.page) || 1);
         const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 12));
@@ -324,7 +325,7 @@ export const getFilteredCars = async (req, res) => {
 
     } catch (error) {
         console.error("Get Filtered Cars Error:", error);
-        return res.status(500).json({ 
+        return res.status(500).json({
             success: false,
             message: "Error fetching cars. Please try again later.",
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
