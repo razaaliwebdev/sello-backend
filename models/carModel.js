@@ -1,13 +1,217 @@
+// import mongoose from "mongoose";
+// import User from './userModel.js';
+
+// const carSchema = new mongoose.Schema(
+//     {
+//         images: {
+//             type: [String],
+//             default: [],
+//         },
+
+//         // Make & Model
+//         make: {
+//             type: String,
+//             required: true,
+//             index: true,
+//             trim: true,
+//         },
+//         model: {
+//             type: String,
+//             required: true,
+//             index: true,
+//             trim: true,
+//         },
+//         variant: {
+//             type: String,
+//             trim: true,
+//             default: "N/A",
+//         },
+
+//         // Specs
+//         year: {
+//             type: Number,
+//             required: true,
+//             index: true,
+//             min: 1950,
+//         },
+//         condition: {
+//             type: String,
+//             required: true,
+//             enum: ["New", "Used"],
+//         },
+//         price: {
+//             type: Number,
+//             required: true,
+//             index: true,
+//             min: 0,
+//         },
+
+//         // Colors
+//         colorExterior: {
+//             type: String,
+//             trim: true,
+//             default: "N/A",
+//         },
+//         colorInterior: {
+//             type: String,
+//             trim: true,
+//             default: "N/A",
+//         },
+
+//         // Engine & Transmission
+//         fuelType: {
+//             type: String,
+//             enum: ["Petrol", "Diesel", "Hybrid", "Electric", "CNG"],
+//         },
+//         engineCapacity: {
+//             type: String,
+//             required: true
+//         },
+//         transmission: {
+//             type: String,
+//             enum: ["Automatic", "Manual"],
+//         },
+
+//         mileage: {
+//             type: Number,
+//             min: 0,
+//         },
+
+//         features: {
+//             type: [String],
+//             default: [],
+//         },
+//         regionalSpec: {
+//             type: String,
+//             enum: ["GCC", "American", "Canadian", "European"],
+//         },
+//         bodyType: {
+//             type: String,
+//             enum: ["Roadster", "Cabriolet", "Super", "Micro", "Station", "Muscle", "Sports", "Targa", "Sedan", "SUV", "Hatchback", "Coupe", "Convertible", "Pickup"],
+//         },
+//         // Location
+//         city: {
+//             type: String,
+//             required: true,
+//             index: true,
+//             trim: true,
+//         },
+//         location: {
+//             type: String,
+//             trim: true,
+//             default: "",
+//         },
+
+//         // Seller Info
+//         sellerType: {
+//             type: String,
+//             enum: ["individual", "dealer"],
+//         },
+//         carDoors: {
+//             type: Number,
+//             min: 2,
+//             max: 6,
+//         },
+//         contactNumber: {
+//             type: String,
+//             required: true,
+//             trim: true,
+//         },
+//         postedBy: {
+//             type: mongoose.Schema.Types.ObjectId,
+//             ref: "User",
+//             required: true,
+//         },
+
+//         // Optional: GeoLocation for "Cars Near Me" feature
+//         geoLocation: {
+//             type: {
+//                 type: String,
+//                 enum: ["Point"],
+//                 default: "Point",
+//             },
+//             coordinates: {
+//                 type: [Number], // [longitude, latitude]
+//                 default: [0, 0],
+//             },
+//         },
+//         // New: warranty field
+//         warranty: {
+//             type: String,
+//             enum: ["Yes", "No", "Doesn't Apply"],
+//             required: true
+//         },
+//         // New: horsepower field
+//         horsepower: {
+//             type: String,
+//             default: ""
+//         },
+//         numberOfCylinders: {
+//             type: Number,
+//             min: 1,
+//             max: 16
+//         },
+//         ownerType: {
+//             type: String,
+//             enum: ["Owner", "Dealer", "Dealership"]
+//         }
+//     },
+//     {
+//         timestamps: true,
+//     }
+// );
+
+// // Index for geospatial queries (optional)
+// carSchema.index({ geoLocation: "2dsphere" });
+
+// const Car = mongoose.model("Car", carSchema);
+
+// export default Car;
+
+
+
+
+
+// // Basic Info
+// // title: {
+// //     type: String,
+// //     required: true,
+// //     trim: true,
+// //     maxlength: 100,
+// // },
+// // description: {
+// //     type: String,
+// //     trim: true,
+// //     maxlength: 1000,
+// // },
+
+
+
 import mongoose from "mongoose";
-import User from './userModel.js';
 
 const carSchema = new mongoose.Schema(
     {
         images: {
             type: [String],
             default: [],
+            validate: {
+                validator: (arr) => arr.every((url) => url && typeof url === "string"),
+                message: "Invalid image URLs",
+            },
         },
-
+        // Basic Info
+        title: {
+            type: String,
+            required: true,
+            trim: true,
+            maxlength: 100,
+        },
+        description: {
+            type: String,
+            trim: true,
+            maxlength: 1000,
+            default: "",
+        },
         // Make & Model
         make: {
             type: String,
@@ -26,13 +230,13 @@ const carSchema = new mongoose.Schema(
             trim: true,
             default: "N/A",
         },
-
         // Specs
         year: {
             type: Number,
             required: true,
             index: true,
             min: 1950,
+            max: new Date().getFullYear() + 1, // Prevent future years beyond next year
         },
         condition: {
             type: String,
@@ -45,7 +249,6 @@ const carSchema = new mongoose.Schema(
             index: true,
             min: 0,
         },
-
         // Colors
         colorExterior: {
             type: String,
@@ -57,36 +260,43 @@ const carSchema = new mongoose.Schema(
             trim: true,
             default: "N/A",
         },
-
         // Engine & Transmission
         fuelType: {
             type: String,
+            required: true, // Make required
             enum: ["Petrol", "Diesel", "Hybrid", "Electric", "CNG"],
         },
         engineCapacity: {
             type: String,
-            required: true
+            required: true,
+            enum: ["0-999 CC", "1000-1499 CC", "1500-1999 CC", "2000-2499 CC", "2500+ CC"], // Standardized ranges
         },
         transmission: {
             type: String,
+            required: true, // Make required
             enum: ["Automatic", "Manual"],
         },
-
         mileage: {
             type: Number,
             min: 0,
+            default: 0,
         },
-
         features: {
             type: [String],
             default: [],
+            validate: {
+                validator: (arr) => arr.every((f) => f && typeof f === "string" && f.trim().length > 0),
+                message: "Features must be non-empty strings",
+            },
         },
         regionalSpec: {
             type: String,
+            required: true, // Make required
             enum: ["GCC", "American", "Canadian", "European"],
         },
         bodyType: {
             type: String,
+            required: true, // Make required
             enum: ["Roadster", "Cabriolet", "Super", "Micro", "Station", "Muscle", "Sports", "Targa", "Sedan", "SUV", "Hatchback", "Coupe", "Convertible", "Pickup"],
         },
         // Location
@@ -101,29 +311,33 @@ const carSchema = new mongoose.Schema(
             trim: true,
             default: "",
         },
-
         // Seller Info
         sellerType: {
             type: String,
+            required: true, // Make required
             enum: ["individual", "dealer"],
         },
         carDoors: {
             type: Number,
             min: 2,
             max: 6,
+            default: 4,
         },
         contactNumber: {
             type: String,
             required: true,
             trim: true,
+            validate: {
+                validator: (v) => /^\+?\d{9,15}$/.test(v), // Validate phone number format
+                message: "Invalid contact number",
+            },
         },
         postedBy: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
             required: true,
         },
-
-        // Optional: GeoLocation for "Cars Near Me" feature
+        // GeoLocation
         geoLocation: {
             type: {
                 type: String,
@@ -132,55 +346,46 @@ const carSchema = new mongoose.Schema(
             },
             coordinates: {
                 type: [Number], // [longitude, latitude]
-                default: [0, 0],
+                required: true,
+                validate: {
+                    validator: ([long, lat]) =>
+                        long >= -180 && long <= 180 && lat >= -90 && lat <= 90,
+                    message: "Invalid coordinates: longitude (-180 to 180), latitude (-90 to 90)",
+                },
             },
         },
-        // New: warranty field
+        // Warranty
         warranty: {
             type: String,
+            required: true,
             enum: ["Yes", "No", "Doesn't Apply"],
-            required: true
         },
-        // New: horsepower field
+        // Horsepower
         horsepower: {
             type: String,
-            default: ""
+            default: "N/A",
+            validate: {
+                validator: (v) => v === "N/A" || /^\d+\s*HP$/.test(v), // e.g., "200 HP"
+                message: "Horsepower must be in format 'X HP' or 'N/A'",
+            },
         },
         numberOfCylinders: {
             type: Number,
             min: 1,
-            max: 16
+            max: 16,
+            default: 4,
         },
         ownerType: {
             type: String,
-            enum: ["Owner", "Dealer", "Dealership"]
-        }
+            required: true, // Make required
+            enum: ["Owner", "Dealer", "Dealership"],
+        },
     },
-    {
-        timestamps: true,
-    }
+    { timestamps: true }
 );
 
-// Index for geospatial queries (optional)
 carSchema.index({ geoLocation: "2dsphere" });
 
 const Car = mongoose.model("Car", carSchema);
 
 export default Car;
-
-
-
-
-
-// Basic Info
-// title: {
-//     type: String,
-//     required: true,
-//     trim: true,
-//     maxlength: 100,
-// },
-// description: {
-//     type: String,
-//     trim: true,
-//     maxlength: 1000,
-// },

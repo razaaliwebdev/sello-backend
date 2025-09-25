@@ -6,43 +6,12 @@ import User from '../models/userModel.js';
 
 
 
-// Create Car Controller
+// CREATE CAR Controller
 export const createCar = async (req, res) => {
     try {
         const {
-            make, model, variant, year, condition,
-            price, colorExterior, colorInterior, fuelType, engineCapacity,
-            transmission, mileage, features, city, location, sellerType,
-            carDoors, contactNumber, geoLocation, horsepower, warranty, regionalSpec, bodyType,
-            numberOfCylinders, ownerType
-        } = req.body;
-
-        // console.log(req.body);
-
-        if (!make || !model || !year || !condition || !price || !city || !contactNumber) {
-            return res.status(400).json({
-                message: "Missing required fields: make, model, year, condition, price, city, contactNumber"
-            });
-        }
-
-        if (!["Used", "New"].includes(condition)) {
-            return res.status(400).json({ message: "Invalid condition value. Must be 'new' or 'used'." });
-        }
-
-        console.log("Received files:", req.files?.length || 0);
-
-        let imageUrls = [];
-        if (req.files && req.files.length > 0) {
-            console.log("Uploading images...");
-            const uploadPromises = req.files.map(file => uploadCloudinary(file.buffer));
-            imageUrls = await Promise.all(uploadPromises);
-            console.log("Images uploaded.");
-        }
-
-        console.log("Creating car...");
-
-        const newCar = await Car.create({
-            images: imageUrls,
+            title,
+            description,
             make,
             model,
             variant,
@@ -55,7 +24,9 @@ export const createCar = async (req, res) => {
             engineCapacity,
             transmission,
             mileage,
-            features: features ? features.split(",") : [],
+            features,
+            regionalSpec,
+            bodyType,
             city,
             location,
             sellerType,
@@ -64,14 +35,135 @@ export const createCar = async (req, res) => {
             geoLocation,
             horsepower,
             warranty,
-            regionalSpec,
-            bodyType,
             numberOfCylinders,
             ownerType,
-            postedBy: req.user._id
-        });
+        } = req.body;
 
-        console.log("Car created.");
+        // Required fields validation
+        const requiredFields = {
+            title,
+            make,
+            model,
+            year,
+            condition,
+            price,
+            fuelType,
+            engineCapacity,
+            transmission,
+            regionalSpec,
+            bodyType,
+            city,
+            contactNumber,
+            sellerType,
+            warranty,
+            ownerType,
+        };
+        const missingFields = Object.keys(requiredFields).filter(
+            (key) => !requiredFields[key] && requiredFields[key] !== 0
+        );
+        if (missingFields.length > 0) {
+            return res.status(400).json({
+                message: `Missing required fields: ${missingFields.join(", ")}`,
+            });
+        }
+
+        // Validate condition
+        if (!["New", "Used"].includes(condition)) {
+            return res.status(400).json({
+                message: "Invalid condition value. Must be 'New' or 'Used'.",
+            });
+        }
+
+        // Validate geoLocation
+        let parsedGeoLocation = { type: "Point", coordinates: [0, 0] };
+        if (geoLocation) {
+            try {
+                const coords = JSON.parse(geoLocation);
+                if (
+                    Array.isArray(coords) &&
+                    coords.length === 2 &&
+                    coords[0] >= -180 &&
+                    coords[0] <= 180 &&
+                    coords[1] >= -90 &&
+                    coords[1] <= 90
+                ) {
+                    parsedGeoLocation.coordinates = coords;
+                } else {
+                    return res.status(400).json({
+                        message: "Invalid geoLocation coordinates. Must be [longitude, latitude].",
+                    });
+                }
+            } catch (error) {
+                return res.status(400).json({
+                    message: "Invalid geoLocation format. Must be valid JSON.",
+                });
+            }
+        } else {
+            return res.status(400).json({
+                message: "geoLocation is required.",
+            });
+        }
+
+        // Handle image uploads (max 5 images, JPEG/PNG only)
+        let imageUrls = [];
+        if (req.files && req.files.length > 0) {
+            if (req.files.length > 5) {
+                return res.status(400).json({
+                    message: "Maximum 5 images allowed.",
+                });
+            }
+            const validTypes = ["image/jpeg", "image/png"];
+            for (const file of req.files) {
+                if (!validTypes.includes(file.mimetype)) {
+                    return res.status(400).json({
+                        message: "Invalid file type. Only JPEG and PNG are allowed.",
+                    });
+                }
+            }
+            const uploadPromises = req.files.map((file) => uploadCloudinary(file.buffer));
+            imageUrls = await Promise.all(uploadPromises);
+        }
+
+        // Parse features
+        let parsedFeatures = [];
+        if (features) {
+            parsedFeatures = Array.isArray(features)
+                ? features.filter((f) => f && typeof f === "string" && f.trim().length > 0)
+                : features.split(",").map((f) => f.trim()).filter((f) => f.length > 0);
+        }
+
+        // Create car
+        const newCar = await Car.create({
+            images: imageUrls,
+            title,
+            description: description || "",
+            make,
+            model,
+            variant: variant || "N/A",
+            year,
+            condition,
+            price,
+            colorExterior: colorExterior || "N/A",
+            colorInterior: colorInterior || "N/A",
+            fuelType,
+            engineCapacity,
+            transmission,
+            mileage: mileage || 0,
+            features: parsedFeatures,
+            regionalSpec,
+            bodyType,
+            city,
+            location: location || "",
+            sellerType,
+            carDoors: carDoors || 4,
+            contactNumber,
+            geoLocation: parsedGeoLocation,
+            horsepower: horsepower || "N/A",
+            warranty,
+            numberOfCylinders: numberOfCylinders || 4,
+            ownerType,
+            postedBy: req.user._id,
+        });
 
         // Update user's carsPosted array
         await User.findByIdAndUpdate(
@@ -82,17 +174,17 @@ export const createCar = async (req, res) => {
 
         return res.status(201).json({
             message: "Car created successfully.",
-            car: newCar
+            car: newCar,
         });
-
     } catch (error) {
         console.error("Create Car Error:", error);
         return res.status(500).json({
             message: "Server error while creating car",
-            error: error.message
+            error: error.message,
         });
     }
 };
+
 
 
 
@@ -339,3 +431,106 @@ export const getFilteredCars = async (req, res) => {
         });
     }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Create Car Controller
+// export const createCar = async (req, res) => {
+//     try {
+//         const {
+//             make, model, variant, year, condition,
+//             price, colorExterior, colorInterior, fuelType, engineCapacity,
+//             transmission, mileage, features, city, location, sellerType,
+//             carDoors, contactNumber, geoLocation, horsepower, warranty, regionalSpec, bodyType,
+//             numberOfCylinders, ownerType
+//         } = req.body;
+
+//         // console.log(req.body);
+
+//         if (!make || !model || !year || !condition || !price || !city || !contactNumber) {
+//             return res.status(400).json({
+//                 message: "Missing required fields: make, model, year, condition, price, city, contactNumber"
+//             });
+//         }
+
+//         if (!["Used", "New"].includes(condition)) {
+//             return res.status(400).json({ message: "Invalid condition value. Must be 'new' or 'used'." });
+//         }
+
+//         console.log("Received files:", req.files?.length || 0);
+
+//         let imageUrls = [];
+//         if (req.files && req.files.length > 0) {
+//             console.log("Uploading images...");
+//             const uploadPromises = req.files.map(file => uploadCloudinary(file.buffer));
+//             imageUrls = await Promise.all(uploadPromises);
+//             console.log("Images uploaded.");
+//         }
+
+//         console.log("Creating car...");
+
+//         const newCar = await Car.create({
+//             images: imageUrls,
+//             make,
+//             model,
+//             variant,
+//             year,
+//             condition,
+//             price,
+//             colorExterior,
+//             colorInterior,
+//             fuelType,
+//             engineCapacity,
+//             transmission,
+//             mileage,
+//             features: features ? features.split(",") : [],
+//             city,
+//             location,
+//             sellerType,
+//             carDoors,
+//             contactNumber,
+//             geoLocation,
+//             horsepower,
+//             warranty,
+//             regionalSpec,
+//             bodyType,
+//             numberOfCylinders,
+//             ownerType,
+//             postedBy: req.user._id
+//         });
+
+//         console.log("Car created.");
+
+//         // Update user's carsPosted array
+//         await User.findByIdAndUpdate(
+//             req.user._id,
+//             { $push: { carsPosted: newCar._id } },
+//             { new: true }
+//         );
+
+//         return res.status(201).json({
+//             message: "Car created successfully.",
+//             car: newCar
+//         });
+
+//     } catch (error) {
+//         console.error("Create Car Error:", error);
+//         return res.status(500).json({
+//             message: "Server error while creating car",
+//             error: error.message
+//         });
+//     }
+// };
