@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Car from "../models/carModel.js";
 import { buildCarQuery } from '../utils/buildCarQuery.js';
 import { uploadCloudinary } from '../utils/cloudinary.js'
-
+import User from '../models/userModel.js';
 
 
 
