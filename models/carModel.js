@@ -2,6 +2,11 @@
 import mongoose from "mongoose";
 
 const carSchema = new mongoose.Schema({
+    postedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User", // name of the User model
+        required: true
+    },
     title: { type: String, required: true },
     description: { type: String, default: "" },
     make: { type: String, required: true },
