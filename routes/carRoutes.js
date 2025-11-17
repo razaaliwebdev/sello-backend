@@ -1,5 +1,5 @@
 import express from 'express';
-import { createCar, deleteCar, editCar, getAllCars, getFilteredCars, getMyCars, getSingleCar } from '../controllers/carController.js';
+import { createCar, deleteCar, editCar, getAllCars, getFilteredCars, getMyCars, getSingleCar, markCarAsSold } from '../controllers/carController.js';
 import { upload } from '../middlewares/multer.js';
 import { auth } from '../middlewares/authMiddleware.js';
 
@@ -14,6 +14,7 @@ router.get("/:id", getSingleCar);
 // Protected Routes
 router.post("/", auth, upload.array("images"), createCar);   // Create Car
 router.put("/:id", auth, editCar);                // Edit Car  
+router.put("/:carId/sold", auth, markCarAsSold);  // Mark Car as Sold
 router.delete("/:id", auth, deleteCar);          // Delete Car
 router.get('/my/listings', auth, getMyCars);    // GetMyCars (My Listing)
 

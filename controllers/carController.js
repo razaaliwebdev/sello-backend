@@ -253,45 +253,82 @@ export const getMyCars = async (req, res) => {
 
 
 
-// Get All Cars Controller with Pagination
+// Get All Cars Controller with Pagination (Boosted posts prioritized)
 export const getAllCars = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 12;
         const skip = (page - 1) * limit;
 
+        // Clean up expired boosts
+        await Car.updateMany(
+            { isBoosted: true, boostExpiry: { $lt: new Date() } },
+            { $set: { isBoosted: false, boostPriority: 0 } }
+        );
+
+        // Build query - show approved cars (or cars without isApproved field, which defaults to true)
+        const query = {
+            $or: [
+                { isApproved: true },
+                { isApproved: { $exists: false } }
+            ]
+        };
+
+        // Add condition filter if provided
+        if (req.query.condition && (req.query.condition === 'new' || req.query.condition === 'used')) {
+            // Use $and to combine conditions properly
+            query.$and = [
+                { $or: [{ isApproved: true }, { isApproved: { $exists: false } }] },
+                { condition: req.query.condition }
+            ];
+            delete query.$or;
+        }
+
         // Fetch cars with pagination
-        const cars = await Car.find()
+        // Sort: Featured first, then boosted (by priority), then by creation date
+        const cars = await Car.find(query)
             .skip(skip)
             .limit(limit)
             .populate("postedBy", "name email role")
-            .sort({ createdAt: -1 });
+            .sort({ 
+                featured: -1,
+                isBoosted: -1, 
+                boostPriority: -1, 
+                createdAt: -1 
+            });
 
         // Get total count
-        const total = await Car.countDocuments();
+        const total = await Car.countDocuments(query);
 
         if (!cars || cars.length === 0) {
             return res.status(200).json({
+                success: true,
                 message: "No cars found.",
-                total: 0,
-                page,
-                pages: 0,
-                cars: []
+                data: {
+                    total: 0,
+                    page,
+                    pages: 0,
+                    cars: []
+                }
             });
         }
 
         return res.status(200).json({
+            success: true,
             message: "Fetched cars successfully.",
-            total,
-            page,
-            pages: Math.ceil(total / limit),
-            cars
+            data: {
+                total,
+                page,
+                pages: Math.ceil(total / limit),
+                cars
+            }
         });
     } catch (error) {
         console.error("Get Cars Error:", error.message);
         return res.status(500).json({
+            success: false,
             message: 'Server error while fetching cars',
-            error: error.message
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -304,68 +341,185 @@ export const getSingleCar = async (req, res) => {
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({
+                success: false,
                 message: "Invalid car ID"
-            })
-        };
+            });
+        }
 
         const car = await Car.findById(id).populate("postedBy", "name email role");
 
         if (!car) {
-            return res.status(404).json(
-                {
-                    message: "Car not found"
-                }
-            )
-        };
+            return res.status(404).json({
+                success: false,
+                message: "Car not found"
+            });
+        }
+
+        // Check if boost is expired
+        if (car.isBoosted && car.boostExpiry && new Date() > car.boostExpiry) {
+            car.isBoosted = false;
+            car.boostPriority = 0;
+            await car.save({ validateBeforeSave: false });
+        }
+
+        // Increment views
+        car.views += 1;
+        await car.save({ validateBeforeSave: false });
 
         return res.status(200).json({
-            car,
-            message: "Single Car Fetched Successfully"
+            success: true,
+            message: "Single car fetched successfully",
+            data: car
         });
-
     } catch (error) {
-        console.log("Get Car Error:", error.message);
-        return res.status(500).json(
-            {
-                message: "Server error while fetching car",
-                error: error.message
-            }
-        )
+        console.error("Get Car Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while fetching car",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 };
 
-// Get Car Filter Controller
+// Get Car Filter Controller (Boosted posts prioritized)
+/**
+ * Mark Car as Sold
+ */
+export const markCarAsSold = async (req, res) => {
+    try {
+        const { carId } = req.params;
+        const { isSold } = req.body;
+
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: User not authenticated",
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(carId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid car ID.",
+            });
+        }
+
+        const car = await Car.findById(carId);
+        if (!car) {
+            return res.status(404).json({
+                success: false,
+                message: "Car not found.",
+            });
+        }
+
+        // Check if user owns the car or is admin
+        if (car.postedBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: "You don't have permission to modify this car.",
+            });
+        }
+
+        car.isSold = isSold === true || isSold === 'true';
+        car.soldAt = car.isSold ? new Date() : null;
+
+        await car.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Car ${car.isSold ? 'marked as sold' : 'marked as available'} successfully.`,
+            data: {
+                _id: car._id,
+                title: car.title,
+                isSold: car.isSold,
+                soldAt: car.soldAt
+            }
+        });
+    } catch (error) {
+        console.error("Mark Car as Sold Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 export const getFilteredCars = async (req, res) => {
     try {
-        // console.log('Query params:', req.query);
+        // Clean up expired boosts
+        await Car.updateMany(
+            { isBoosted: true, boostExpiry: { $lt: new Date() } },
+            { $set: { isBoosted: false, boostPriority: 0 } }
+        );
 
         // Validate and parse pagination parameters
         const page = Math.max(1, parseInt(req.query.page) || 1);
         const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 12));
         const skip = (page - 1) * limit;
 
-        // Build filter query
+        // Build filter query - show approved cars (or cars without isApproved field)
         const filter = buildCarQuery(req.query);
-        // console.log('Built filter:', JSON.stringify(filter, null, 2));
+        
+        // Add approval check - show approved or cars without isApproved field
+        const approvalFilter = {
+            $or: [
+                { isApproved: true },
+                { isApproved: { $exists: false } }
+            ]
+        };
+        
+        // Exclude sold cars by default (unless explicitly requested)
+        const soldFilter = req.query.includeSold === 'true' ? {} : { isSold: { $ne: true } };
+        
+        // Combine filters using $and
+        const finalFilter = {
+            $and: [
+                filter,
+                approvalFilter,
+                soldFilter
+            ]
+        };
 
         // Validate and set sort parameters
         const allowedSortFields = [
-            "price", "year", "mileage", "numberOfCylinders", "carDoors"
+            "price", "year", "mileage", "numberOfCylinders", "carDoors", "views"
         ];
-        const sortField = allowedSortFields.includes(req.query.sort) ? req.query.sort : "price";
-        const sortOrder = req.query.order === "asc" ? 1 : -1; // Default to descending
-        const sort = { [sortField]: sortOrder };
+        const sortField = allowedSortFields.includes(req.query.sort) ? req.query.sort : null;
+        const sortOrder = req.query.order === "asc" ? 1 : -1;
+
+        // Build sort object - prioritize boosted posts
+        let sort = {};
+        if (sortField) {
+            // If custom sort, still prioritize boosted posts
+            sort = {
+                featured: -1,
+                isBoosted: -1,
+                boostPriority: -1,
+                [sortField]: sortOrder,
+                createdAt: -1
+            };
+        } else {
+            // Default sort: Featured > Boosted > Date
+            sort = {
+                featured: -1,
+                isBoosted: -1,
+                boostPriority: -1,
+                createdAt: -1
+            };
+        }
 
         // Execute queries in parallel
         let cars, total;
         try {
             [cars, total] = await Promise.all([
-                Car.find(filter)
+                Car.find(finalFilter)
                     .sort(sort)
                     .skip(skip)
                     .limit(limit)
+                    .populate("postedBy", "name email role")
                     .lean(),
-                Car.countDocuments(filter)
+                Car.countDocuments(finalFilter)
             ]);
         } catch (dbError) {
             console.error('Database query error:', dbError);
@@ -379,15 +533,18 @@ export const getFilteredCars = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            count: cars.length,
-            total,
-            page,
-            pages,
-            limit,
-            hasNextPage,
-            hasPreviousPage,
-            data: cars,
-            filters: Object.keys(req.query).length > 0 ? req.query : undefined
+            message: "Filtered cars retrieved successfully.",
+            data: {
+                count: cars.length,
+                total,
+                page,
+                pages,
+                limit,
+                hasNextPage,
+                hasPreviousPage,
+                cars,
+                filters: Object.keys(req.query).length > 0 ? req.query : undefined
+            }
         });
 
     } catch (error) {

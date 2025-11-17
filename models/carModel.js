@@ -81,9 +81,71 @@ const carSchema = new mongoose.Schema({
     numberOfCylinders: { type: Number, default: 4, max: 16 },
     ownerType: { type: String, required: true, enum: ["Owner", "Dealer", "Dealership"] },
     images: [{ type: String }],
+    // Boost Post Fields
+    isBoosted: {
+        type: Boolean,
+        default: false
+    },
+    boostExpiry: {
+        type: Date,
+        default: null
+    },
+    boostPriority: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
+    boostHistory: [{
+        boostedAt: { type: Date, default: Date.now },
+        boostedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        boostType: { type: String, enum: ["user", "admin"], default: "user" },
+        duration: { type: Number }, // in days
+        expiredAt: { type: Date }
+    }],
+    // Admin Management Fields
+    isApproved: {
+        type: Boolean,
+        default: true // Auto-approve, admin can reject
+    },
+    approvedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null
+    },
+    approvedAt: {
+        type: Date,
+        default: null
+    },
+    rejectionReason: {
+        type: String,
+        default: null
+    },
+    views: {
+        type: Number,
+        default: 0
+    },
+    featured: {
+        type: Boolean,
+        default: false
+    },
+    isSold: {
+        type: Boolean,
+        default: false
+    },
+    soldAt: {
+        type: Date,
+        default: null
+    }
 });
 
+// Indexes for better query performance
 carSchema.index({ geoLocation: "2dsphere" });
+carSchema.index({ isBoosted: 1, boostExpiry: 1 });
+carSchema.index({ isApproved: 1, isBoosted: 1, boostPriority: -1, createdAt: -1 });
+carSchema.index({ postedBy: 1 });
+carSchema.index({ featured: 1, isBoosted: 1 });
+carSchema.index({ isSold: 1, isApproved: 1 });
 
 const Car = mongoose.model("Car", carSchema);
 

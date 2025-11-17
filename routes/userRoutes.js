@@ -1,24 +1,20 @@
 import express from 'express';
-import passport from "passport";
-import { forgotPassword, getUserProfile, googleLogin, login, logoutController, register, resetPassword, verifyOtp } from '../controllers/userController.js';
+import {
+    getUserProfile,
+    updateProfile,
+    getBoostCredits
+} from '../controllers/userController.js';
 import { upload } from '../middlewares/multer.js';
 import { auth } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
+// All routes require authentication
+router.use(auth);
 
-// Public Routes
-router.post("/register", upload.single("avatar"), register);
-router.post("/login", login);
-router.post("/forgot-password", forgotPassword);
-router.post("/verify-otp", verifyOtp);
-router.post("/reset-password", resetPassword);
-router.post("/google", googleLogin);
-router.post("/logout", logoutController);
-
-
-// Protected Routes
-router.get("/me", auth, getUserProfile);
-
+// User Profile Routes
+router.get("/me", getUserProfile);
+router.put("/profile", upload.single("avatar"), updateProfile);
+router.get("/boost-credits", getBoostCredits);
 
 export default router;
