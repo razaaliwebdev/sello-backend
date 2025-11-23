@@ -104,7 +104,7 @@ export const createBlog = async (req, res) => {
             featuredImage,
             images,
             category: category || null,
-            tags: tags ? (Array.isArray(tags) ? JSON.parse(tags) : tags.split(',').map(t => t.trim())) : [],
+            tags: tags ? (typeof tags === 'string' && tags.startsWith('[') ? JSON.parse(tags) : (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : (Array.isArray(tags) ? tags : []))) : [],
             author: req.user._id,
             status: status || "draft",
             readTime,

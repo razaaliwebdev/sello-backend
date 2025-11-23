@@ -19,6 +19,8 @@ import chatbotRouter from './routes/chatbotRoutes.js';
 import contactFormRouter from './routes/contactFormRoutes.js';
 import carChatRouter from './routes/carChatRoutes.js';
 import customerRequestRouter from './routes/customerRequestRoutes.js';
+import bannerRouter from './routes/bannerRoutes.js';
+import testimonialRouter from './routes/testimonialRoutes.js';
 
 dotenv.config();
 
@@ -54,6 +56,8 @@ app.use("/api/chatbot", chatbotRouter);
 app.use("/api/contact-form", contactFormRouter);
 app.use("/api/car-chat", carChatRouter);
 app.use("/api/customer-requests", customerRequestRouter);
+app.use("/api/banners", bannerRouter);
+app.use("/api/testimonials", testimonialRouter);
 
 // Health check route
 app.get("/", (req, res) => {
