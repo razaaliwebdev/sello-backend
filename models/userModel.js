@@ -48,6 +48,20 @@ const userSchema = new mongoose.Schema(
             enum: ["buyer", "seller", "admin", "dealer"],
             default: "buyer"
         },
+        adminRole: {
+            type: String,
+            enum: ["Super Admin", "Moderator", "Support Agent", "Content Manager", "Dealer Manager", null],
+            default: null
+        },
+        roleId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Role",
+            default: null
+        },
+        permissions: {
+            type: mongoose.Schema.Types.Mixed,
+            default: {}
+        },
         avatar: {
             type: String,
             default: null

@@ -21,6 +21,7 @@ import carChatRouter from './routes/carChatRoutes.js';
 import customerRequestRouter from './routes/customerRequestRoutes.js';
 import bannerRouter from './routes/bannerRoutes.js';
 import testimonialRouter from './routes/testimonialRoutes.js';
+import roleRouter from './routes/roleRoutes.js';
 
 dotenv.config();
 
@@ -58,6 +59,7 @@ app.use("/api/car-chat", carChatRouter);
 app.use("/api/customer-requests", customerRequestRouter);
 app.use("/api/banners", bannerRouter);
 app.use("/api/testimonials", testimonialRouter);
+app.use("/api/roles", roleRouter);
 
 // Health check route
 app.get("/", (req, res) => {

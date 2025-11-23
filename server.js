@@ -2,8 +2,11 @@ import http from 'http';
 import { app } from "./app.js";
 import connectDB from './config/db.js';
 import { initializeSocket } from './socket/socketServer.js';
+import { initializeRoles } from './controllers/roleController.js';
 
 connectDB().then(() => {
+    // Initialize default roles
+    initializeRoles();
     const PORT = process.env.PORT || 4000;
     
     // Create HTTP server
