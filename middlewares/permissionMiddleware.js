@@ -7,9 +7,28 @@ import Role from '../models/roleModel.js';
 export const hasPermission = (permission) => {
     return async (req, res, next) => {
         try {
-            // Admin has all permissions
+            // Original admins (adminRole is null/undefined) have full access
+            // Super Admin role has full access
+            // Users with inviteUsers permission have full access
             if (req.user.role === "admin") {
-                return next();
+                if (!req.user.adminRole || req.user.adminRole === null || req.user.adminRole === "Super Admin") {
+                    return next();
+                }
+                
+                // Check if user has inviteUsers permission
+                let userPermissions = {};
+                if (req.user.roleId) {
+                    const role = await Role.findById(req.user.roleId);
+                    if (role && role.isActive) {
+                        userPermissions = role.permissions || {};
+                    }
+                } else if (req.user.permissions) {
+                    userPermissions = req.user.permissions;
+                }
+                
+                if (userPermissions.inviteUsers === true) {
+                    return next();
+                }
             }
 
             // Get user's role and permissions
@@ -50,9 +69,28 @@ export const hasPermission = (permission) => {
 export const hasAnyPermission = (...permissions) => {
     return async (req, res, next) => {
         try {
-            // Admin has all permissions
+            // Original admins (adminRole is null/undefined) have full access
+            // Super Admin role has full access
+            // Users with inviteUsers permission have full access
             if (req.user.role === "admin") {
-                return next();
+                if (!req.user.adminRole || req.user.adminRole === null || req.user.adminRole === "Super Admin") {
+                    return next();
+                }
+                
+                // Check if user has inviteUsers permission
+                let userPermissions = {};
+                if (req.user.roleId) {
+                    const role = await Role.findById(req.user.roleId);
+                    if (role && role.isActive) {
+                        userPermissions = role.permissions || {};
+                    }
+                } else if (req.user.permissions) {
+                    userPermissions = req.user.permissions;
+                }
+                
+                if (userPermissions.inviteUsers === true) {
+                    return next();
+                }
             }
 
             // Get user's role and permissions
@@ -95,9 +133,28 @@ export const hasAnyPermission = (...permissions) => {
 export const hasAllPermissions = (...permissions) => {
     return async (req, res, next) => {
         try {
-            // Admin has all permissions
+            // Original admins (adminRole is null/undefined) have full access
+            // Super Admin role has full access
+            // Users with inviteUsers permission have full access
             if (req.user.role === "admin") {
-                return next();
+                if (!req.user.adminRole || req.user.adminRole === null || req.user.adminRole === "Super Admin") {
+                    return next();
+                }
+                
+                // Check if user has inviteUsers permission
+                let userPermissions = {};
+                if (req.user.roleId) {
+                    const role = await Role.findById(req.user.roleId);
+                    if (role && role.isActive) {
+                        userPermissions = role.permissions || {};
+                    }
+                } else if (req.user.permissions) {
+                    userPermissions = req.user.permissions;
+                }
+                
+                if (userPermissions.inviteUsers === true) {
+                    return next();
+                }
             }
 
             // Get user's role and permissions

@@ -256,15 +256,29 @@ export const getMyCars = async (req, res) => {
 // Get All Cars Controller with Pagination (Boosted posts prioritized)
 export const getAllCars = async (req, res) => {
     try {
+        // Check MongoDB connection
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection unavailable. Please try again later.',
+                error: 'MongoDB not connected'
+            });
+        }
+
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 12;
         const skip = (page - 1) * limit;
 
         // Clean up expired boosts
-        await Car.updateMany(
-            { isBoosted: true, boostExpiry: { $lt: new Date() } },
-            { $set: { isBoosted: false, boostPriority: 0 } }
-        );
+        try {
+            await Car.updateMany(
+                { isBoosted: true, boostExpiry: { $lt: new Date() } },
+                { $set: { isBoosted: false, boostPriority: 0 } }
+            );
+        } catch (dbError) {
+            // If updateMany fails, log but continue (non-critical operation)
+            console.warn("Failed to clean up expired boosts:", dbError.message);
+        }
 
         // Build query - show approved cars (or cars without isApproved field, which defaults to true)
         const query = {
@@ -447,11 +461,25 @@ export const markCarAsSold = async (req, res) => {
 
 export const getFilteredCars = async (req, res) => {
     try {
+        // Check MongoDB connection
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection unavailable. Please try again later.',
+                error: 'MongoDB not connected'
+            });
+        }
+
         // Clean up expired boosts
-        await Car.updateMany(
-            { isBoosted: true, boostExpiry: { $lt: new Date() } },
-            { $set: { isBoosted: false, boostPriority: 0 } }
-        );
+        try {
+            await Car.updateMany(
+                { isBoosted: true, boostExpiry: { $lt: new Date() } },
+                { $set: { isBoosted: false, boostPriority: 0 } }
+            );
+        } catch (dbError) {
+            // If updateMany fails, log but continue (non-critical operation)
+            console.warn("Failed to clean up expired boosts:", dbError.message);
+        }
 
         // Validate and parse pagination parameters
         const page = Math.max(1, parseInt(req.query.page) || 1);

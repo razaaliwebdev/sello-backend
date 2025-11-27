@@ -3,6 +3,8 @@ import User from '../models/userModel.js';
 import Invite from '../models/inviteModel.js';
 import { createAuditLog } from '../utils/auditLogger.js';
 import sendEmail from '../utils/sendEmail.js';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
 // Role presets based on requirements
@@ -643,6 +645,217 @@ export const getPermissionMatrix = async (req, res) => {
         });
     } catch (error) {
         console.error("Get Permission Matrix Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Get invite details by token (public endpoint)
+ */
+export const getInviteByToken = async (req, res) => {
+    try {
+        const { token } = req.params;
+
+        if (!token) {
+            return res.status(400).json({
+                success: false,
+                message: "Invite token is required."
+            });
+        }
+
+        const invite = await Invite.findOne({ token })
+            .populate('invitedBy', 'name email')
+            .select('-token'); // Don't send token back
+
+        if (!invite) {
+            return res.status(404).json({
+                success: false,
+                message: "Invalid or expired invitation link."
+            });
+        }
+
+        // Check if invite is expired
+        if (invite.isExpired()) {
+            invite.status = "expired";
+            await invite.save({ validateBeforeSave: false });
+            return res.status(400).json({
+                success: false,
+                message: "This invitation has expired. Please contact the administrator for a new invitation."
+            });
+        }
+
+        // Check if already accepted
+        if (invite.status === "accepted") {
+            return res.status(400).json({
+                success: false,
+                message: "This invitation has already been accepted."
+            });
+        }
+
+        // Check if cancelled
+        if (invite.status === "cancelled") {
+            return res.status(400).json({
+                success: false,
+                message: "This invitation has been cancelled."
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Invite details retrieved successfully.",
+            data: {
+                email: invite.email,
+                fullName: invite.fullName,
+                role: invite.role,
+                expiresAt: invite.expiresAt,
+                invitedBy: invite.invitedBy
+            }
+        });
+    } catch (error) {
+        console.error("Get Invite By Token Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Accept invite and create user account (public endpoint)
+ */
+export const acceptInvite = async (req, res) => {
+    try {
+        const { token } = req.params;
+        const { password } = req.body;
+
+        if (!token) {
+            return res.status(400).json({
+                success: false,
+                message: "Invite token is required."
+            });
+        }
+
+        if (!password || password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "Password is required and must be at least 6 characters long."
+            });
+        }
+
+        const invite = await Invite.findOne({ token });
+
+        if (!invite) {
+            return res.status(404).json({
+                success: false,
+                message: "Invalid invitation link."
+            });
+        }
+
+        // Check if invite is expired
+        if (invite.isExpired()) {
+            invite.status = "expired";
+            await invite.save({ validateBeforeSave: false });
+            return res.status(400).json({
+                success: false,
+                message: "This invitation has expired. Please contact the administrator for a new invitation."
+            });
+        }
+
+        // Check if already accepted
+        if (invite.status === "accepted") {
+            return res.status(400).json({
+                success: false,
+                message: "This invitation has already been accepted."
+            });
+        }
+
+        // Check if cancelled
+        if (invite.status === "cancelled") {
+            return res.status(400).json({
+                success: false,
+                message: "This invitation has been cancelled."
+            });
+        }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email: invite.email.toLowerCase() });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: "A user with this email already exists. Please login instead."
+            });
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 12);
+
+        // Create user with admin role and permissions
+        const user = await User.create({
+            name: invite.fullName,
+            email: invite.email.toLowerCase(),
+            password: hashedPassword,
+            role: "admin", // All invited users are admins
+            adminRole: invite.role, // Store the specific admin role
+            roleId: invite.roleId || null,
+            permissions: invite.permissions || {},
+            status: "active",
+            verified: true,
+            isEmailVerified: true,
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(invite.fullName)}&background=4F46E5&color=fff`
+        });
+
+        // Update invite status
+        invite.status = "accepted";
+        invite.acceptedAt = new Date();
+        invite.acceptedBy = user._id;
+        await invite.save({ validateBeforeSave: false });
+
+        // Generate JWT token
+        const jwtToken = jwt.sign(
+            { id: user._id, email: user.email },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        );
+
+        // Log the acceptance
+        await createAuditLog(user, "invite_accepted", {
+            inviteId: invite._id,
+            role: invite.role
+        }, null, req);
+
+        return res.status(201).json({
+            success: true,
+            message: "Invitation accepted successfully. Your account has been created.",
+            data: {
+                user: {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    avatar: user.avatar,
+                    role: user.role,
+                    adminRole: user.adminRole,
+                    permissions: user.permissions,
+                    status: user.status
+                },
+                token: jwtToken
+            }
+        });
+    } catch (error) {
+        console.error("Accept Invite Error:", error.message);
+        
+        // Handle duplicate email error
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                message: "A user with this email already exists."
+            });
+        }
+
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

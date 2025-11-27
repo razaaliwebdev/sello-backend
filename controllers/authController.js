@@ -486,11 +486,31 @@ export const googleLogin = async (req, res) => {
             });
         }
 
+        // Check if GOOGLE_CLIENT_ID is configured
+        if (!process.env.GOOGLE_CLIENT_ID) {
+            console.error("GOOGLE_CLIENT_ID is not configured in environment variables");
+            return res.status(500).json({
+                success: false,
+                message: "Google authentication is not configured. Please contact support.",
+                error: process.env.NODE_ENV === 'development' ? "GOOGLE_CLIENT_ID environment variable is missing" : undefined
+            });
+        }
+
         // Verify Google token
-        const ticket = await client.verifyIdToken({
-            idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID,
-        });
+        let ticket;
+        try {
+            ticket = await client.verifyIdToken({
+                idToken: token,
+                audience: process.env.GOOGLE_CLIENT_ID,
+            });
+        } catch (verifyError) {
+            console.error("Google token verification error:", verifyError.message);
+            return res.status(401).json({
+                success: false,
+                message: "Invalid Google token. Please try logging in again.",
+                error: process.env.NODE_ENV === 'development' ? verifyError.message : undefined
+            });
+        }
 
         const payload = ticket.getPayload();
         const { email, name, picture } = payload;
@@ -566,9 +586,24 @@ export const googleLogin = async (req, res) => {
         });
     } catch (error) {
         console.error("Google Login Error:", error.message);
+        console.error("Error details:", error);
+        
+        // Provide more specific error messages
+        let errorMessage = "Invalid Google token or authentication failed.";
+        
+        if (error.message?.includes("Token used too early")) {
+            errorMessage = "Token is not yet valid. Please try again.";
+        } else if (error.message?.includes("Token used too late")) {
+            errorMessage = "Token has expired. Please try logging in again.";
+        } else if (error.message?.includes("Invalid token signature")) {
+            errorMessage = "Invalid token signature. Please try logging in again.";
+        } else if (error.message?.includes("Wrong number of segments")) {
+            errorMessage = "Invalid token format. Please try logging in again.";
+        }
+        
         return res.status(401).json({
             success: false,
-            message: "Invalid Google token or authentication failed.",
+            message: errorMessage,
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
