@@ -268,13 +268,40 @@ export const getAllUsers = async (req, res) => {
 
         // Build query
         const query = {};
-        if (role) query.role = role;
-        if (status) query.status = status;
-        if (search) {
+        
+        // Handle role filter - special case for admin to include team members
+        if (role === 'admin') {
+            // Fetch users with role='admin' OR those who have adminRole set (team members)
             query.$or = [
+                { role: 'admin' },
+                { adminRole: { $exists: true, $ne: null } }
+            ];
+        } else if (role) {
+            query.role = role;
+        }
+        
+        if (status) {
+            query.status = status;
+        }
+        
+        // Handle search - combine with existing query conditions
+        if (search) {
+            const searchConditions = [
                 { name: { $regex: search, $options: 'i' } },
                 { email: { $regex: search, $options: 'i' } }
             ];
+            
+            // If we already have an $or for admin users, combine with $and
+            if (query.$or) {
+                query.$and = [
+                    { $or: query.$or },
+                    { $or: searchConditions }
+                ];
+                delete query.$or;
+            } else {
+                // Just add search conditions
+                query.$or = searchConditions;
+            }
         }
 
         const users = await User.find(query)

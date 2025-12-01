@@ -7,23 +7,24 @@ import User from '../models/userModel.js';
  */
 export const auth = async (req, res, next) => {
     try {
-        const authHeader = req.headers.authorization;
+        let token = null;
 
-        // Check if authorization header exists
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-            return res.status(401).json({
-                success: false,
-                message: "Not authorized. No token provided or invalid format."
-            });
+        // Try to get token from Authorization header first
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            token = authHeader.split(" ")[1];
         }
 
-        // Extract token
-        const token = authHeader.split(" ")[1];
+        // Fallback: try to get token from cookies
+        if (!token && req.cookies && req.cookies.token) {
+            token = req.cookies.token;
+        }
 
+        // Check if token exists
         if (!token) {
             return res.status(401).json({
                 success: false,
-                message: "Not authorized. Token is missing."
+                message: "Not authorized. No token provided or invalid format."
             });
         }
 

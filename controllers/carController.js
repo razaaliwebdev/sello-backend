@@ -158,36 +158,127 @@ export const createCar = async (req, res) => {
 // Edit Car Controller
 export const editCar = async (req, res) => {
     try {
-
         const { id } = req.params;
+        
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({
+                success: false,
                 message: "Invalid car ID"
             });
-        };
+        }
+
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: User not authenticated"
+            });
+        }
 
         const car = await Car.findById(id);
+        if (!car) {
+            return res.status(404).json({
+                success: false,
+                message: "Car not found"
+            });
+        }
 
-        // Only owner or admin  can update
+        // Only owner or admin can update
         if (car.postedBy.toString() !== req.user._id.toString() && req.user.role !== "admin") {
-            return res.status(400).json({ message: "You are not authorized to update this car." })
-        };
+            return res.status(403).json({
+                success: false,
+                message: "You are not authorized to update this car."
+            });
+        }
 
-        const updatedCar = await Car.findByIdAndUpdate(id, req.body, { new: true });
+        // Extract fields from request body
+        const updateData = { ...req.body };
+
+        // Handle image updates if new images are provided
+        if (req.files && req.files.length > 0) {
+            const uploadedImages = await Promise.all(
+                req.files.map(async (file) => {
+                    try {
+                        const imageUrl = await uploadCloudinary(file.buffer);
+                        return imageUrl;
+                    } catch (err) {
+                        console.error("Error uploading image:", err);
+                        return null;
+                    }
+                })
+            );
+            const newImages = uploadedImages.filter((url) => url);
+            
+            // If existing images are provided in body, merge them; otherwise replace
+            if (updateData.existingImages && Array.isArray(updateData.existingImages)) {
+                updateData.images = [...updateData.existingImages, ...newImages];
+            } else {
+                updateData.images = newImages;
+            }
+            delete updateData.existingImages;
+        } else if (updateData.existingImages) {
+            // Only existing images, no new uploads
+            updateData.images = Array.isArray(updateData.existingImages) 
+                ? updateData.existingImages 
+                : [updateData.existingImages];
+            delete updateData.existingImages;
+        }
+
+        // Parse geoLocation if provided
+        if (updateData.geoLocation && typeof updateData.geoLocation === 'string') {
+            try {
+                const parsedGeoLocation = JSON.parse(updateData.geoLocation);
+                if (Array.isArray(parsedGeoLocation) && parsedGeoLocation.length === 2) {
+                    updateData.geoLocation = {
+                        type: 'Point',
+                        coordinates: parsedGeoLocation
+                    };
+                }
+            } catch (e) {
+                // Invalid geoLocation format, remove it
+                delete updateData.geoLocation;
+            }
+        }
+
+        // Parse features if provided
+        if (updateData.features) {
+            updateData.features = parseArray(updateData.features);
+        }
+
+        // Convert numeric fields
+        if (updateData.year) updateData.year = parseInt(updateData.year);
+        if (updateData.price) updateData.price = parseFloat(updateData.price);
+        if (updateData.mileage) updateData.mileage = parseInt(updateData.mileage);
+        if (updateData.carDoors) updateData.carDoors = parseInt(updateData.carDoors);
+        if (updateData.numberOfCylinders) updateData.numberOfCylinders = parseInt(updateData.numberOfCylinders);
+
+        // Validate contactNumber if provided
+        if (updateData.contactNumber && !/^\+?\d{9,15}$/.test(updateData.contactNumber)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid contact number. Must be 9-15 digits.'
+            });
+        }
+
+        // Update car
+        const updatedCar = await Car.findByIdAndUpdate(
+            id,
+            updateData,
+            { new: true, runValidators: true }
+        ).populate("postedBy", "name email role");
 
         return res.status(200).json({
-            updatedCar,
-            message: "Car Updated Successfully."
+            success: true,
+            message: "Car updated successfully.",
+            data: updatedCar
         });
 
     } catch (error) {
-        console.log("Update Car Error", error.message);
-        res.status(500).json(
-            {
-                message: "Sever error while updating car",
-                error: error.message
-            }
-        )
+        console.error("Update Car Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while updating car",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 };
 
@@ -232,9 +323,12 @@ export const deleteCar = async (req, res) => {
 };
 
 // GetMyCars (My Listing) Car Controller
+// This shows ALL cars posted by user, including sold ones
 export const getMyCars = async (req, res) => {
     try {
-        const cars = await Car.find({ postedBy: req.user._id }).sort({ createdAt: -1 });
+        const cars = await Car.find({ postedBy: req.user._id })
+            .sort({ createdAt: -1 })
+            .populate("postedBy", "name email role");
 
         return res.status(200).json({
             message: "My Cars Fetched Successfully.",
@@ -281,21 +375,31 @@ export const getAllCars = async (req, res) => {
         }
 
         // Build query - show approved cars (or cars without isApproved field, which defaults to true)
-        const query = {
+        // Exclude sold cars by default (unless explicitly requested)
+        const baseQuery = {
             $or: [
                 { isApproved: true },
                 { isApproved: { $exists: false } }
-            ]
+            ],
+            isSold: { $ne: true } // Exclude sold cars
         };
 
+        // If includeSold is explicitly set to 'true', show all cars including sold ones
+        if (req.query.includeSold === 'true') {
+            delete baseQuery.isSold;
+        }
+
         // Add condition filter if provided
+        let query = { ...baseQuery };
         if (req.query.condition && (req.query.condition === 'new' || req.query.condition === 'used')) {
             // Use $and to combine conditions properly
-            query.$and = [
-                { $or: [{ isApproved: true }, { isApproved: { $exists: false } }] },
-                { condition: req.query.condition }
-            ];
-            delete query.$or;
+            query = {
+                $and: [
+                    { $or: [{ isApproved: true }, { isApproved: { $exists: false } }] },
+                    { condition: req.query.condition },
+                    { isSold: req.query.includeSold === 'true' ? { $exists: true } : { $ne: true } }
+                ]
+            };
         }
 
         // Fetch cars with pagination

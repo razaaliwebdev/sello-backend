@@ -15,6 +15,11 @@ const inviteSchema = new mongoose.Schema(
             required: true,
             trim: true
         },
+        phone: {
+            type: String,
+            default: null,
+            trim: true
+        },
         role: {
             type: String,
             required: true,
@@ -65,12 +70,12 @@ const inviteSchema = new mongoose.Schema(
 );
 
 // Generate unique token
-inviteSchema.statics.generateToken = function() {
+inviteSchema.statics.generateToken = function () {
     return crypto.randomBytes(32).toString('hex');
 };
 
 // Check if invite is expired
-inviteSchema.methods.isExpired = function() {
+inviteSchema.methods.isExpired = function () {
     return this.expiresAt < new Date();
 };
 

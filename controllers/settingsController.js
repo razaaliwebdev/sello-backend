@@ -1,4 +1,5 @@
 import Settings from '../models/settingsModel.js';
+import { createAuditLog } from '../utils/auditLogger.js';
 
 /**
  * Get All Settings
@@ -105,11 +106,29 @@ export const upsertSetting = async (req, res) => {
             });
         }
 
+        // Convert value based on type
+        let processedValue = value;
+        const valueType = type || "string";
+        
+        if (valueType === "boolean") {
+            processedValue = value === true || value === "true" || value === 1 || value === "1";
+        } else if (valueType === "number") {
+            processedValue = Number(value) || 0;
+        } else if (valueType === "object" && typeof value === "string") {
+            try {
+                processedValue = JSON.parse(value);
+            } catch (e) {
+                processedValue = value;
+            }
+        } else {
+            processedValue = String(value);
+        }
+
         const setting = await Settings.findOneAndUpdate(
             { key },
             {
-                value,
-                type: type || "string",
+                value: processedValue,
+                type: valueType,
                 category: category || "general",
                 description: description || "",
                 updatedBy: req.user._id
@@ -119,6 +138,12 @@ export const upsertSetting = async (req, res) => {
                 upsert: true
             }
         );
+
+        await createAuditLog(req.user, "setting_updated", {
+            key,
+            value,
+            category
+        }, null, req);
 
         return res.status(200).json({
             success: true,
@@ -162,6 +187,10 @@ export const deleteSetting = async (req, res) => {
             success: true,
             message: "Setting deleted successfully."
         });
+
+        await createAuditLog(req.user, "setting_deleted", {
+            key
+        }, null, req);
     } catch (error) {
         console.error("Delete Setting Error:", error.message);
         return res.status(500).json({

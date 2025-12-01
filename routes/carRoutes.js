@@ -13,7 +13,7 @@ router.get("/:id", getSingleCar);
 
 // Protected Routes
 router.post("/", auth, upload.array("images"), createCar);   // Create Car
-router.put("/:id", auth, editCar);                // Edit Car  
+router.put("/:id", auth, upload.array("images"), editCar);  // Edit Car (with image upload support)
 router.put("/:carId/sold", auth, markCarAsSold);  // Mark Car as Sold
 router.delete("/:id", auth, deleteCar);          // Delete Car
 router.get('/my/listings', auth, getMyCars);    // GetMyCars (My Listing)

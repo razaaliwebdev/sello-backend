@@ -223,4 +223,33 @@ All errors are JSON with a `message` field. Common status codes:
 
 ---
 
+---
+
+## Email Configuration (SMTP)
+
+To enable OTP and email notifications, configure SMTP settings in your `.env` file:
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_MAIL=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+```
+
+### Gmail Setup:
+1. Enable 2-Step Verification in your Google Account
+2. Go to Google Account > Security > App passwords
+3. Generate an app password for "Mail"
+4. Use this app password as `SMTP_PASSWORD` (not your regular password)
+
+### Development Mode:
+If SMTP is not configured in development mode, OTPs will be logged to the server console instead of being sent via email. Check your server logs for the OTP code.
+
+### Other SMTP Providers:
+- **Outlook/Hotmail**: `smtp-mail.outlook.com:587`
+- **Yahoo**: `smtp.mail.yahoo.com:587`
+- **Custom SMTP**: Use your provider's SMTP settings
+
+---
+
 **For any issues, contact the maintainer or open an issue.**

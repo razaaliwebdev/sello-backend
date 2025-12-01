@@ -416,7 +416,7 @@ export const inviteUser = async (req, res) => {
             });
         }
 
-        const { email, fullName, role, roleId, permissions, expirationDays, password, twoFactorCode } = req.body;
+        const { email, fullName, phone, role, roleId, permissions, expirationDays, password, twoFactorCode } = req.body;
 
         if (!email || !fullName || !role) {
             return res.status(400).json({
@@ -475,6 +475,7 @@ export const inviteUser = async (req, res) => {
         const invite = await Invite.create({
             email: email.toLowerCase(),
             fullName,
+            phone,
             role,
             roleId: roleId || null,
             permissions: rolePermissions,
@@ -599,7 +600,7 @@ export const getPermissionMatrix = async (req, res) => {
         }
 
         const roles = await Role.find({ isActive: true }).sort({ name: 1 });
-        
+
         // Get all permission keys
         const permissionKeys = [
             "manageUsers", "createRoles", "editRoles", "deleteRoles", "inviteUsers", "resetPasswords",
@@ -620,11 +621,11 @@ export const getPermissionMatrix = async (req, res) => {
                 accessLevel: role.accessLevel,
                 purpose: role.purpose
             };
-            
+
             permissionKeys.forEach(key => {
                 row[key] = role.permissions[key] || false;
             });
-            
+
             return row;
         });
 
@@ -710,6 +711,7 @@ export const getInviteByToken = async (req, res) => {
             data: {
                 email: invite.email,
                 fullName: invite.fullName,
+                phone: invite.phone,
                 role: invite.role,
                 expiresAt: invite.expiresAt,
                 invitedBy: invite.invitedBy
@@ -798,6 +800,7 @@ export const acceptInvite = async (req, res) => {
         const user = await User.create({
             name: invite.fullName,
             email: invite.email.toLowerCase(),
+            phone: invite.phone,
             password: hashedPassword,
             role: "admin", // All invited users are admins
             adminRole: invite.role, // Store the specific admin role
@@ -847,7 +850,7 @@ export const acceptInvite = async (req, res) => {
         });
     } catch (error) {
         console.error("Accept Invite Error:", error.message);
-        
+
         // Handle duplicate email error
         if (error.code === 11000) {
             return res.status(409).json({

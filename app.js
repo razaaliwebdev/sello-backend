@@ -22,6 +22,7 @@ import customerRequestRouter from './routes/customerRequestRoutes.js';
 import bannerRouter from './routes/bannerRoutes.js';
 import testimonialRouter from './routes/testimonialRoutes.js';
 import roleRouter from './routes/roleRoutes.js';
+import uploadRouter from './routes/uploadRoutes.js';
 
 dotenv.config();
 
@@ -34,6 +35,14 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization", "email"],
   credentials: true
 }));
+
+// Add security headers for Google OAuth
+app.use((req, res, next) => {
+  // Set Cross-Origin-Opener-Policy to allow Google OAuth popup
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  res.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
+  next();
+});
 
 app.use(express.json());
 app.use(cookieParser());
@@ -60,6 +69,7 @@ app.use("/api/customer-requests", customerRequestRouter);
 app.use("/api/banners", bannerRouter);
 app.use("/api/testimonials", testimonialRouter);
 app.use("/api/roles", roleRouter);
+app.use("/api/upload", uploadRouter);
 
 // Health check route
 app.get("/", (req, res) => {

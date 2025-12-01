@@ -190,6 +190,14 @@ export const login = async (req, res) => {
         // Generate token
         const token = generateToken(user._id, user.email);
 
+        // Set token in cookie as well (for compatibility)
+        res.cookie('token', token, {
+            httpOnly: false, // Allow client-side access
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        });
+
         // Return response
         return res.status(200).json({
             success: true,
@@ -276,7 +284,7 @@ export const forgotPassword = async (req, res) => {
     </div>
     <div style="padding: 40px 30px;">
       <p style="font-size: 18px; color: #555; line-height: 1.6; margin-bottom: 25px;">
-        Hi ${user.name},<br>
+        Hi ${user.name || 'User'},<br>
         You requested to reset your password on <b style="color: #FF6B00;">SELLO</b>.
       </p>
       <p style="font-size: 17px; color: #444; line-height: 1.6;">
@@ -311,18 +319,53 @@ export const forgotPassword = async (req, res) => {
         `;
 
         try {
-            await sendEmail(user.email, subject, html);
-        } catch (emailError) {
-            console.error("Email sending error:", emailError);
-            // Clear OTP if email fails
-            user.otp = null;
-            user.otpExpiry = null;
-            await user.save({ validateBeforeSave: false });
+            const emailResult = await sendEmail(user.email, subject, html);
             
-            return res.status(500).json({
-                success: false,
-                message: "Failed to send OTP. Please try again later."
-            });
+            // If email wasn't actually sent (dev mode), log it but still return success
+            const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
+            if (emailResult?.messageId === 'dev-mode') {
+                console.log(`\n✅ OTP saved for user ${user.email}. OTP: ${otp}`);
+                console.log(`⚠️  Development mode - Email not sent. Check console for OTP.\n`);
+            }
+        } catch (emailError) {
+            console.error("❌ Email sending error:", emailError.message);
+            console.error("Full error details:", emailError);
+            console.error("Stack trace:", emailError.stack);
+            
+            // Check if SMTP is not configured
+            const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
+            const isMissingSMTP = emailError.message.includes("Email configuration is missing");
+            
+            // If SMTP is missing and we're in development, log OTP and still return success
+            if (isMissingSMTP && isDevelopment) {
+                console.log(`\n⚠️  SMTP not configured. OTP for ${user.email}: ${otp}\n`);
+                // Continue - don't return error, just log it
+            } else if (isMissingSMTP) {
+                // Production mode but SMTP not configured - log OTP to console and return success
+                console.log(`\n⚠️  SMTP not configured in production. OTP for ${user.email}: ${otp}`);
+                console.log(`⚠️  Please configure SMTP settings to enable email delivery.\n`);
+                // Still return success since OTP is saved in DB
+            } else {
+                // Other email errors - clear OTP and return error
+                user.otp = null;
+                user.otpExpiry = null;
+                await user.save({ validateBeforeSave: false });
+                
+                let errorMessage = "Failed to send OTP. Please try again later.";
+                if (emailError.message.includes("SMTP")) {
+                    errorMessage = "Email service connection failed. Please try again later.";
+                } else if (emailError.message.includes("authentication") || emailError.message.includes("Invalid login")) {
+                    errorMessage = "Email service authentication failed. Please check SMTP credentials.";
+                } else if (emailError.message.includes("ECONNREFUSED") || emailError.message.includes("timeout")) {
+                    errorMessage = "Could not connect to email server. Please try again later.";
+                }
+                
+                return res.status(500).json({
+                    success: false,
+                    message: errorMessage,
+                    error: isDevelopment ? emailError.message : undefined
+                });
+            }
         }
 
         return res.status(200).json({
@@ -567,6 +610,14 @@ export const googleLogin = async (req, res) => {
         // Generate JWT token
         const jwtToken = generateToken(user._id, user.email);
 
+        // Set token in cookie as well (for compatibility)
+        res.cookie('token', jwtToken, {
+            httpOnly: false, // Allow client-side access
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        });
+
         return res.status(200).json({
             success: true,
             message: "Google login successful.",
@@ -579,7 +630,9 @@ export const googleLogin = async (req, res) => {
                     role: user.role,
                     status: user.status,
                     verified: user.verified,
-                    isEmailVerified: user.isEmailVerified
+                    isEmailVerified: user.isEmailVerified,
+                    adminRole: user.adminRole,
+                    roleId: user.roleId
                 },
                 token: jwtToken
             }
