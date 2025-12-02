@@ -45,6 +45,14 @@ export const createCategory = async (req, res) => {
             });
         }
 
+        // Validate subType for location categories
+        if (type === 'location' && subType && !['country', 'city', 'state'].includes(subType)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid subType for location category. Must be 'country', 'city', or 'state'."
+            });
+        }
+
         // Validate parentCategory if provided
         if (parentCategory) {
             if (!mongoose.Types.ObjectId.isValid(parentCategory)) {
@@ -65,6 +73,13 @@ export const createCategory = async (req, res) => {
                 return res.status(400).json({
                     success: false,
                     message: "Model categories must have a make category as parent."
+                });
+            }
+            // Cities (and states) must have a country as parent
+            if (['city', 'state'].includes(subType) && parent.subType !== 'country') {
+                return res.status(400).json({
+                    success: false,
+                    message: "City and state categories must have a country category as parent."
                 });
             }
         }
@@ -249,6 +264,12 @@ export const updateCategory = async (req, res) => {
                     message: "Invalid subType for car category."
                 });
             }
+            if (category.type === 'location' && subType && !['country', 'city', 'state'].includes(subType)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid subType for location category."
+                });
+            }
             category.subType = subType;
         }
         if (parentCategory !== undefined) {
@@ -258,6 +279,29 @@ export const updateCategory = async (req, res) => {
                     message: "Invalid parent category ID."
                 });
             }
+
+            if (parentCategory) {
+                const parent = await Category.findById(parentCategory);
+                if (!parent) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Parent category not found."
+                    });
+                }
+                if (category.type === 'car' && category.subType === 'model' && parent.subType !== 'make') {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Model categories must have a make category as parent."
+                    });
+                }
+                if (category.type === 'location' && ['city', 'state'].includes(category.subType) && parent.subType !== 'country') {
+                    return res.status(400).json({
+                        success: false,
+                        message: "City and state categories must have a country category as parent."
+                    });
+                }
+            }
+
             category.parentCategory = parentCategory || null;
         }
         if (isActive !== undefined) category.isActive = isActive;

@@ -23,12 +23,12 @@ const categorySchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ["car", "blog"],
+        enum: ["car", "blog", "location"],
         required: true
     },
     subType: {
         type: String,
-        enum: ["make", "model", "year", null],
+        enum: ["make", "model", "year", "country", "city", "state", null],
         default: null
     },
     parentCategory: {
