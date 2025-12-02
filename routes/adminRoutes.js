@@ -10,7 +10,8 @@ import {
     deleteCar,
     featureCar,
     getAllDealers,
-    verifyDealer
+    verifyDealer,
+    getListingHistory
 } from '../controllers/adminController.js';
 import { auth, authorize } from '../middlewares/authMiddleware.js';
 
@@ -34,6 +35,7 @@ router.get("/listings", getAllCars);
 router.put("/listings/:carId/approve", approveCar);
 router.put("/listings/:carId/feature", featureCar);
 router.delete("/listings/:carId", deleteCar);
+router.get("/listings/history", getListingHistory);
 
 // Dealer Management
 router.get("/dealers", getAllDealers);

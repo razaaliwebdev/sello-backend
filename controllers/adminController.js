@@ -1,6 +1,7 @@
 import User from '../models/userModel.js';
 import Car from '../models/carModel.js';
 import CustomerRequest from '../models/customerRequestModel.js';
+import ListingHistory from '../models/listingHistoryModel.js';
 import mongoose from 'mongoose';
 
 /**
@@ -657,50 +658,172 @@ export const approveCar = async (req, res) => {
  * Delete Car (Admin)
  */
 export const deleteCar = async (req, res) => {
-    try {
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: "Only admins can delete cars."
-            });
-        }
-
-        const { carId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(carId)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid car ID."
-            });
-        }
-
-        const car = await Car.findById(carId);
-        if (!car) {
-            return res.status(404).json({
-                success: false,
-                message: "Car not found."
-            });
-        }
-
-        // Remove car from user's carsPosted array
-        await User.findByIdAndUpdate(car.postedBy, {
-            $pull: { carsPosted: carId }
-        });
-
-        await car.deleteOne();
-
-        return res.status(200).json({
-            success: true,
-            message: "Car deleted successfully."
-        });
-    } catch (error) {
-        console.error("Delete Car (Admin) Error:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can delete cars.",
+      });
     }
+
+    const { carId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(carId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid car ID.",
+      });
+    }
+
+    const car = await Car.findById(carId);
+    if (!car) {
+      return res.status(404).json({
+        success: false,
+        message: "Car not found.",
+      });
+    }
+
+    // Create history record BEFORE deletion (no images)
+    try {
+      await ListingHistory.create({
+        oldListingId: car._id,
+        title: car.title,
+        make: car.make,
+        model: car.model,
+        year: car.year,
+        mileage: car.mileage,
+        finalStatus: car.isSold ? "sold" : "deleted",
+        finalSellingDate: car.soldAt || car.soldDate || null,
+        sellerUser: car.postedBy,
+        isAutoDeleted: false,
+        deletedBy: req.user._id,
+        deletedAt: new Date(),
+      });
+    } catch (historyError) {
+      console.error("Failed to create listing history on admin delete:", historyError);
+      // Do not block deletion if history fails, but log it
+    }
+
+    // Mark as deleted in case any references remain, then remove
+    car.status = "deleted";
+    car.deletedAt = new Date();
+    car.deletedBy = req.user._id;
+    await car.save({ validateBeforeSave: false });
+
+    // Remove car from user's carsPosted array
+    await User.findByIdAndUpdate(car.postedBy, {
+      $pull: { carsPosted: carId },
+    });
+
+    await car.deleteOne();
+
+    return res.status(200).json({
+      success: true,
+      message: "Car deleted successfully.",
+    });
+  } catch (error) {
+    console.error("Delete Car (Admin) Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
+/**
+ * Get Listing History (deleted / sold listings without images)
+ * Filters:
+ * - status: 'sold' | 'expired' | 'deleted' | 'all'
+ * - isAutoDeleted: 'true' | 'false'
+ * - from / to: date range on finalSellingDate / deletedAt
+ */
+export const getListingHistory = async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can view listing history.",
+      });
+    }
+
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const skip = (page - 1) * limit;
+
+    const { status, isAutoDeleted, from, to, search } = req.query;
+
+    // Build a plain JavaScript query object (this used to have TypeScript-only syntax)
+    const query = {};
+
+    if (status && status !== "all") {
+      query.finalStatus = status;
+    }
+
+    if (isAutoDeleted === "true") {
+      query.isAutoDeleted = true;
+    } else if (isAutoDeleted === "false") {
+      query.isAutoDeleted = false;
+    }
+
+    if (from || to) {
+      const dateFilter = {};
+      if (from) {
+        dateFilter.$gte = new Date(from);
+      }
+      if (to) {
+        dateFilter.$lte = new Date(to);
+      }
+      // Prefer sold date if present, fall back to deletedAt
+      query.$or = [
+        { finalSellingDate: dateFilter },
+        { finalSellingDate: null, deletedAt: dateFilter },
+      ];
+    }
+
+    if (search && typeof search === "string" && search.trim().length > 0) {
+      const regex = new RegExp(search.trim(), "i");
+      query.$or = [
+        ...(query.$or || []),
+        { title: regex },
+        { make: regex },
+        { model: regex },
+      ];
+    }
+
+    const [history, total] = await Promise.all([
+      ListingHistory.find(query)
+        .populate("sellerUser", "name email role")
+        .populate("deletedBy", "name email role")
+        .sort({ deletedAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      ListingHistory.countDocuments(query),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Listing history retrieved successfully.",
+      data: {
+        history,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get Listing History Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
 
 /**

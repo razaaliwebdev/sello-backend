@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Car from "../models/carModel.js";
+import ListingHistory from "../models/listingHistoryModel.js";
 import { uploadCloudinary } from '../utils/cloudinary.js'
 import User from '../models/userModel.js';
 import { parseArray, buildCarQuery } from '../utils/parseArray.js';
@@ -323,10 +324,13 @@ export const deleteCar = async (req, res) => {
 };
 
 // GetMyCars (My Listing) Car Controller
-// This shows ALL cars posted by user, including sold ones
+// This shows cars posted by user that are not fully deleted
 export const getMyCars = async (req, res) => {
     try {
-        const cars = await Car.find({ postedBy: req.user._id })
+        const cars = await Car.find({
+            postedBy: req.user._id,
+            status: { $ne: "deleted" },
+        })
             .sort({ createdAt: -1 })
             .populate("postedBy", "name email role");
 
@@ -374,30 +378,51 @@ export const getAllCars = async (req, res) => {
             console.warn("Failed to clean up expired boosts:", dbError.message);
         }
 
+        const now = new Date();
+
         // Build query - show approved cars (or cars without isApproved field, which defaults to true)
-        // Exclude sold cars by default (unless explicitly requested)
+        // Exclude hard-deleted cars, and exclude sold cars past their autoDeleteDate
         const baseQuery = {
-            $or: [
-                { isApproved: true },
-                { isApproved: { $exists: false } }
+            $and: [
+                {
+                    $or: [{ isApproved: true }, { isApproved: { $exists: false } }],
+                },
+                {
+                    status: { $ne: "deleted" },
+                },
+                {
+                    $or: [
+                        { status: { $ne: "sold" } },
+                        { autoDeleteDate: { $gt: now } },
+                        // Backwards-compatibility: listings without autoDeleteDate stay visible
+                        { autoDeleteDate: { $exists: false } },
+                    ],
+                },
             ],
-            isSold: { $ne: true } // Exclude sold cars
         };
 
-        // If includeSold is explicitly set to 'true', show all cars including sold ones
-        if (req.query.includeSold === 'true') {
-            delete baseQuery.isSold;
+        // If includeSold is explicitly set to 'true', also allow sold ones through (still respecting autoDeleteDate)
+        if (req.query.includeSold === "true") {
+            baseQuery.$and = baseQuery.$and.filter(
+                (clause) =>
+                    !(
+                        clause.$or &&
+                        clause.$or.some((c) => c.status && c.status.$ne === "sold")
+                    )
+            );
         }
 
         // Add condition filter if provided
         let query = { ...baseQuery };
-        if (req.query.condition && (req.query.condition === 'new' || req.query.condition === 'used')) {
+        if (
+            req.query.condition &&
+            (req.query.condition === "new" || req.query.condition === "used")
+        ) {
             // Use $and to combine conditions properly
             query = {
                 $and: [
                     { $or: [{ isApproved: true }, { isApproved: { $exists: false } }] },
                     { condition: req.query.condition },
-                    { isSold: req.query.includeSold === 'true' ? { $exists: true } : { $ne: true } }
                 ]
             };
         }
@@ -408,11 +433,13 @@ export const getAllCars = async (req, res) => {
             .skip(skip)
             .limit(limit)
             .populate("postedBy", "name email role")
-            .sort({ 
+            .sort({
                 featured: -1,
-                isBoosted: -1, 
-                boostPriority: -1, 
-                createdAt: -1 
+                isBoosted: -1,
+                boostPriority: -1,
+                // push sold listings lower in the results, similar to OLX / PakWheels
+                status: 1, // "active" < "sold" < "expired" < "deleted"
+                createdAt: -1,
             });
 
         // Get total count
@@ -501,66 +528,93 @@ export const getSingleCar = async (req, res) => {
 
 // Get Car Filter Controller (Boosted posts prioritized)
 /**
- * Mark Car as Sold
+ * Mark Car as Sold / Available
+ * - When marking as sold:
+ *   - status = 'sold'
+ *   - soldAt / soldDate = now
+ *   - autoDeleteDate = soldDate + 7 days
+ * - When marking as available (undo sold):
+ *   - status = 'active'
+ *   - sold flags cleared
  */
 export const markCarAsSold = async (req, res) => {
-    try {
-        const { carId } = req.params;
-        const { isSold } = req.body;
+  try {
+    const { carId } = req.params;
+    const { isSold } = req.body;
 
-        if (!req.user) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized: User not authenticated",
-            });
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(carId)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid car ID.",
-            });
-        }
-
-        const car = await Car.findById(carId);
-        if (!car) {
-            return res.status(404).json({
-                success: false,
-                message: "Car not found.",
-            });
-        }
-
-        // Check if user owns the car or is admin
-        if (car.postedBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: "You don't have permission to modify this car.",
-            });
-        }
-
-        car.isSold = isSold === true || isSold === 'true';
-        car.soldAt = car.isSold ? new Date() : null;
-
-        await car.save();
-
-        return res.status(200).json({
-            success: true,
-            message: `Car ${car.isSold ? 'marked as sold' : 'marked as available'} successfully.`,
-            data: {
-                _id: car._id,
-                title: car.title,
-                isSold: car.isSold,
-                soldAt: car.soldAt
-            }
-        });
-    } catch (error) {
-        console.error("Mark Car as Sold Error:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized: User not authenticated",
+      });
     }
+
+    if (!mongoose.Types.ObjectId.isValid(carId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid car ID.",
+      });
+    }
+
+    const car = await Car.findById(carId);
+    if (!car) {
+      return res.status(404).json({
+        success: false,
+        message: "Car not found.",
+      });
+    }
+
+    // Check if user owns the car or is admin
+    if (
+      car.postedBy.toString() !== req.user._id.toString() &&
+      req.user.role !== "admin"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "You don't have permission to modify this car.",
+      });
+    }
+
+    const markSold = isSold === true || isSold === "true";
+    const now = new Date();
+
+    car.isSold = markSold;
+    car.soldAt = markSold ? now : null;
+    car.soldDate = markSold ? now : null;
+    car.status = markSold ? "sold" : "active";
+    car.isAutoDeleted = false;
+    car.deletedAt = null;
+    car.deletedBy = null;
+    car.autoDeleteDate = markSold
+      ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+      : null;
+
+    await car.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Car ${
+        car.isSold ? "marked as sold" : "marked as available"
+      } successfully.`,
+      data: {
+        _id: car._id,
+        title: car.title,
+        isSold: car.isSold,
+        soldAt: car.soldAt,
+        soldDate: car.soldDate,
+        status: car.status,
+        autoDeleteDate: car.autoDeleteDate,
+      },
+    });
+  } catch (error) {
+    console.error("Mark Car as Sold Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
 
 export const getFilteredCars = async (req, res) => {
@@ -600,16 +654,25 @@ export const getFilteredCars = async (req, res) => {
                 { isApproved: { $exists: false } }
             ]
         };
-        
-        // Exclude sold cars by default (unless explicitly requested)
-        const soldFilter = req.query.includeSold === 'true' ? {} : { isSold: { $ne: true } };
-        
+
+        const now = new Date();
+
+        // Visibility filter: exclude deleted, and sold cars after their autoDeleteDate
+        const visibilityFilter = {
+            status: { $ne: "deleted" },
+            $or: [
+                { status: { $ne: "sold" } },
+                { autoDeleteDate: { $gt: now } },
+                { autoDeleteDate: { $exists: false } }
+            ]
+        };
+
         // Combine filters using $and
         const finalFilter = {
             $and: [
                 filter,
                 approvalFilter,
-                soldFilter
+                visibilityFilter
             ]
         };
 
