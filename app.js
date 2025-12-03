@@ -23,6 +23,7 @@ import bannerRouter from './routes/bannerRoutes.js';
 import testimonialRouter from './routes/testimonialRoutes.js';
 import roleRouter from './routes/roleRoutes.js';
 import uploadRouter from './routes/uploadRoutes.js';
+import newsletterRouter from './routes/newsletterRoutes.js';
 
 dotenv.config();
 
@@ -33,13 +34,15 @@ app.use(cors({
   origin: ["http://localhost:5173", "http://127.0.0.1:5173", "https://sello.ae"],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization", "email"],
-  credentials: true
+  credentials: true,
+  exposedHeaders: ["Set-Cookie"]
 }));
 
 // Add security headers for Google OAuth
+// Note: COOP "unsafe-none" is needed for Google OAuth to work properly
 app.use((req, res, next) => {
-  // Set Cross-Origin-Opener-Policy to allow Google OAuth popup
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  // Allow cross-origin communication for OAuth flows
+  res.setHeader("Cross-Origin-Opener-Policy", "unsafe-none");
   res.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
   next();
 });
@@ -70,6 +73,7 @@ app.use("/api/banners", bannerRouter);
 app.use("/api/testimonials", testimonialRouter);
 app.use("/api/roles", roleRouter);
 app.use("/api/upload", uploadRouter);
+app.use("/api/newsletter", newsletterRouter);
 
 // Health check route
 app.get("/", (req, res) => {

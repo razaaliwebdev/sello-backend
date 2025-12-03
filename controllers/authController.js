@@ -542,15 +542,34 @@ export const googleLogin = async (req, res) => {
         // Verify Google token
         let ticket;
         try {
+            // Verify the token with the correct client ID
             ticket = await client.verifyIdToken({
                 idToken: token,
                 audience: process.env.GOOGLE_CLIENT_ID,
             });
         } catch (verifyError) {
             console.error("Google token verification error:", verifyError.message);
+            console.error("Error details:", {
+                message: verifyError.message,
+                code: verifyError.code,
+                clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Missing"
+            });
+            
+            // Provide more specific error messages
+            let errorMessage = "Invalid Google token. Please try logging in again.";
+            if (verifyError.message?.includes("Wrong number of segments")) {
+                errorMessage = "Invalid token format. Please try again.";
+            } else if (verifyError.message?.includes("Token used too early") || verifyError.message?.includes("Token used too late")) {
+                errorMessage = "Token has expired. Please try logging in again.";
+            } else if (verifyError.message?.includes("Invalid token signature")) {
+                errorMessage = "Token signature is invalid. Please try again.";
+            } else if (verifyError.message?.includes("Invalid audience")) {
+                errorMessage = "Token audience mismatch. Please check Google OAuth configuration.";
+            }
+            
             return res.status(401).json({
                 success: false,
-                message: "Invalid Google token. Please try logging in again.",
+                message: errorMessage,
                 error: process.env.NODE_ENV === 'development' ? verifyError.message : undefined
             });
         }

@@ -18,7 +18,12 @@ const notificationSchema = new mongoose.Schema({
     recipient: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
-        default: null // null means broadcast to all users
+        default: null // null means broadcast to all users or role-based
+    },
+    targetRole: {
+        type: String,
+        enum: ["buyer", "seller", "dealer", null],
+        default: null // null means all users, or specific role for targeting
     },
     isRead: {
         type: Boolean,

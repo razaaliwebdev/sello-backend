@@ -62,11 +62,23 @@ export const initializeSocket = (server) => {
         // Join user's personal room
         socket.join(`user:${socket.userId}`);
 
+        // Join role-based room for notifications
+        if (socket.user.role) {
+            socket.join(`role:${socket.user.role}`);
+            console.log(`User ${socket.userId} joined role room: role:${socket.user.role}`);
+        }
+
         // If admin, join admin room
         if (socket.user.role === 'admin') {
             socket.join('admin:room');
             console.log(`Admin connected: ${socket.userId}`);
         }
+
+        // Join notifications room
+        socket.on('join-notifications', () => {
+            socket.join(`user:${socket.userId}`);
+            console.log(`User ${socket.userId} joined notifications room`);
+        });
 
         // Join all user's chat rooms (both support and car chats)
         socket.on('join-chats', async () => {

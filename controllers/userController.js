@@ -9,7 +9,8 @@ export const getUserProfile = async (req, res) => {
         const user = await User.findById(req.user._id)
             .select("-password -otp -otpExpiry")
             .populate("carsPosted", "title make model price images")
-            .populate("carsPurchased", "title make model price images");
+            .populate("carsPurchased", "title make model price images")
+            .populate("savedCars", "title make model price images");
 
         if (!user) {
             return res.status(404).json({
@@ -35,6 +36,7 @@ export const getUserProfile = async (req, res) => {
                 isEmailVerified: user.isEmailVerified,
                 carsPosted: user.carsPosted,
                 carsPurchased: user.carsPurchased,
+                savedCars: user.savedCars,
                 createdAt: user.createdAt,
                 updatedAt: user.updatedAt,
                 lastLogin: user.lastLogin
@@ -123,6 +125,130 @@ export const getBoostCredits = async (req, res) => {
         });
     } catch (error) {
         console.error("Get Boost Credits Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Save Car to Wishlist
+ */
+export const saveCar = async (req, res) => {
+    try {
+        const { carId } = req.params;
+        const userId = req.user._id;
+
+        if (!carId) {
+            return res.status(400).json({
+                success: false,
+                message: "Car ID is required."
+            });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        // Check if car is already saved
+        if (user.savedCars.includes(carId)) {
+            return res.status(200).json({
+                success: true,
+                message: "Car is already saved.",
+                data: { saved: true }
+            });
+        }
+
+        // Add car to saved list
+        user.savedCars.push(carId);
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Car saved successfully.",
+            data: { saved: true }
+        });
+    } catch (error) {
+        console.error("Save Car Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Unsave Car from Wishlist
+ */
+export const unsaveCar = async (req, res) => {
+    try {
+        const { carId } = req.params;
+        const userId = req.user._id;
+
+        if (!carId) {
+            return res.status(400).json({
+                success: false,
+                message: "Car ID is required."
+            });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        // Remove car from saved list
+        user.savedCars = user.savedCars.filter(id => id.toString() !== carId.toString());
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Car removed from saved list.",
+            data: { saved: false }
+        });
+    } catch (error) {
+        console.error("Unsave Car Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Get Saved Cars
+ */
+export const getSavedCars = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id)
+            .select("savedCars")
+            .populate("savedCars", "title make model year price images condition fuelType transmission mileage city");
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Saved cars retrieved successfully.",
+            data: user.savedCars || []
+        });
+    } catch (error) {
+        console.error("Get Saved Cars Error:", error.message);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

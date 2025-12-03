@@ -44,7 +44,7 @@ const blogSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["draft", "published", "archived"],
+        enum: ["draft", "published", "archived", "scheduled", "pending"],
         default: "draft"
     },
     isFeatured: {

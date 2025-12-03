@@ -1,6 +1,7 @@
 import express from 'express';
 import {
     createTestimonial,
+    createPublicReview,
     getAllTestimonials,
     getTestimonialById,
     updateTestimonial,
@@ -13,6 +14,8 @@ const router = express.Router();
 
 // Public routes (for frontend)
 router.get("/", getAllTestimonials);
+// Public review submission (authenticated users can submit) - must be before /:testimonialId
+router.post("/submit", auth, upload.single('image'), createPublicReview);
 router.get("/:testimonialId", getTestimonialById);
 
 // Admin routes

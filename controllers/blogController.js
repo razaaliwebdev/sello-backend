@@ -139,7 +139,15 @@ export const getAllBlogs = async (req, res) => {
         const { status, category, author, search, isFeatured } = req.query;
 
         const query = {};
-        if (status) query.status = status;
+        
+        // If user is not admin, only show published blogs
+        if (!req.user || req.user.role !== 'admin') {
+            query.status = 'published';
+        } else if (status) {
+            // Admin can filter by any status
+            query.status = status;
+        }
+        
         if (category) query.category = category;
         if (author) query.author = author;
         if (isFeatured !== undefined) query.isFeatured = isFeatured === 'true';
@@ -202,6 +210,14 @@ export const getBlogById = async (req, res) => {
             .populate("author", "name email avatar");
 
         if (!blog) {
+            return res.status(404).json({
+                success: false,
+                message: "Blog post not found."
+            });
+        }
+
+        // If user is not admin, only allow access to published blogs
+        if ((!req.user || req.user.role !== 'admin') && blog.status !== 'published') {
             return res.status(404).json({
                 success: false,
                 message: "Blog post not found."

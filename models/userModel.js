@@ -140,6 +140,13 @@ const userSchema = new mongoose.Schema(
                 type: mongoose.Schema.Types.ObjectId,
                 ref: "Car"
             }
+        ],
+        // 💾 Saved/Wishlist cars
+        savedCars: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Car"
+            }
         ]
     },
     {

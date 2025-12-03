@@ -277,12 +277,47 @@ export const getAllUsers = async (req, res) => {
                 { role: 'admin' },
                 { adminRole: { $exists: true, $ne: null } }
             ];
-        } else if (role) {
-            query.role = role;
+        } else {
+            // For regular users (buyers, sellers, dealers) - exclude admins
+            // Build conditions using $and
+            const conditions = [];
+            
+            // Exclude users where role is 'admin'
+            conditions.push({ role: { $ne: 'admin' } });
+            
+            // Exclude users with adminRole set (team members have adminRole as string)
+            // Regular users have adminRole: null (default)
+            // Use $in with null to match null values, or check if field doesn't exist
+            conditions.push({ 
+                $or: [
+                    { adminRole: null },
+                    { adminRole: { $exists: false } }
+                ]
+            });
+            
+            // If specific role is requested, add it
+            if (role) {
+                conditions.push({ role: role });
+            }
+            
+            // Combine all conditions with $and
+            query.$and = conditions;
         }
         
+        // Debug: Log the query structure (always log for troubleshooting)
+        console.log('=== USER QUERY DEBUG ===');
+        console.log('Role filter:', role);
+        console.log('Status filter:', status);
+        console.log('Search:', search);
+        console.log('Query:', JSON.stringify(query, null, 2));
+        
+        // Add status filter
         if (status) {
-            query.status = status;
+            if (query.$and) {
+                query.$and.push({ status: status });
+            } else {
+                query.status = status;
+            }
         }
         
         // Handle search - combine with existing query conditions
@@ -292,15 +327,17 @@ export const getAllUsers = async (req, res) => {
                 { email: { $regex: search, $options: 'i' } }
             ];
             
-            // If we already have an $or for admin users, combine with $and
-            if (query.$or) {
+            if (query.$and) {
+                query.$and.push({ $or: searchConditions });
+            } else if (query.$or) {
+                // For admin role filter, combine search with existing $or
                 query.$and = [
                     { $or: query.$or },
                     { $or: searchConditions }
                 ];
                 delete query.$or;
             } else {
-                // Just add search conditions
+                // Simple case - just add search conditions
                 query.$or = searchConditions;
             }
         }
@@ -312,6 +349,18 @@ export const getAllUsers = async (req, res) => {
             .sort({ createdAt: -1 });
 
         const total = await User.countDocuments(query);
+        
+        // Debug: Log results for troubleshooting (always log)
+        console.log(`Found ${users.length} users (total: ${total})`);
+        if (users.length > 0) {
+            console.log('Sample user roles:', users.slice(0, 3).map(u => ({ 
+                name: u.name, 
+                role: u.role, 
+                adminRole: u.adminRole 
+            })));
+        } else {
+            console.log('No users found with query:', JSON.stringify(query, null, 2));
+        }
 
         return res.status(200).json({
             success: true,

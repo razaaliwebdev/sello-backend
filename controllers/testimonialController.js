@@ -3,7 +3,68 @@ import mongoose from 'mongoose';
 import { uploadCloudinary } from '../utils/cloudinary.js';
 
 /**
- * Create Testimonial
+ * Create Testimonial (Public - for user reviews)
+ */
+export const createPublicReview = async (req, res) => {
+    try {
+        // Allow authenticated users to submit reviews
+        const { name, role, company, text, rating } = req.body;
+
+        if (!name || !text) {
+            return res.status(400).json({
+                success: false,
+                message: "Name and review text are required."
+            });
+        }
+
+        if (rating && (rating < 1 || rating > 5)) {
+            return res.status(400).json({
+                success: false,
+                message: "Rating must be between 1 and 5."
+            });
+        }
+
+        // Handle image upload (optional)
+        let imageUrl = null;
+        if (req.file) {
+            try {
+                imageUrl = await uploadCloudinary(req.file.buffer);
+            } catch (error) {
+                console.error("Error uploading image:", error);
+                // Continue without image if upload fails
+            }
+        }
+
+        const testimonial = await Testimonial.create({
+            name: name.trim(),
+            role: role || "",
+            company: company || "",
+            image: imageUrl,
+            text: text.trim(),
+            rating: rating || 5,
+            isActive: false, // Reviews need admin approval
+            order: 0,
+            featured: false,
+            createdBy: req.user?._id || null
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Review submitted successfully. It will be published after admin approval.",
+            data: testimonial
+        });
+    } catch (error) {
+        console.error("Create Public Review Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Create Testimonial (Admin only)
  */
 export const createTestimonial = async (req, res) => {
     try {

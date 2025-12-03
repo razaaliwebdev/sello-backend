@@ -14,7 +14,7 @@ export const createNotification = async (req, res) => {
             });
         }
 
-        const { title, message, type, recipient, actionUrl, actionText, expiresAt } = req.body;
+        const { title, message, type, recipient, targetAudience, actionUrl, actionText, expiresAt } = req.body;
 
         if (!title || !message) {
             return res.status(400).json({
@@ -23,20 +23,65 @@ export const createNotification = async (req, res) => {
             });
         }
 
+        // Determine targetRole based on targetAudience
+        let targetRole = null;
+        if (targetAudience && targetAudience !== 'all' && !recipient) {
+            // Map targetAudience to role
+            const roleMap = {
+                'buyers': 'buyer',
+                'sellers': 'seller',
+                'dealers': 'dealer'
+            };
+            targetRole = roleMap[targetAudience] || null;
+        }
+
         const notification = await Notification.create({
             title: title.trim(),
             message,
             type: type || "info",
-            recipient: recipient || null, // null = broadcast
+            recipient: recipient || null, // null = broadcast or role-based
+            targetRole: targetRole,
             actionUrl: actionUrl || null,
             actionText: actionText || null,
             createdBy: req.user._id,
             expiresAt: expiresAt ? new Date(expiresAt) : null
         });
 
+        // Emit notification via socket.io
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                const notificationData = {
+                    _id: notification._id,
+                    title: notification.title,
+                    message: notification.message,
+                    type: notification.type,
+                    actionUrl: notification.actionUrl,
+                    actionText: notification.actionText,
+                    createdAt: notification.createdAt
+                };
+
+                if (recipient) {
+                    // Send to specific user
+                    io.to(`user:${recipient}`).emit('new-notification', notificationData);
+                } else if (targetRole) {
+                    // Send to all users with specific role
+                    io.to(`role:${targetRole}`).emit('new-notification', notificationData);
+                    // Also emit to admin room for tracking
+                    io.to('admin:room').emit('new-notification', notificationData);
+                } else {
+                    // Broadcast to all users
+                    io.emit('new-notification', notificationData);
+                }
+            }
+        } catch (socketError) {
+            console.error("Error emitting notification via socket:", socketError);
+            // Don't fail the request if socket emission fails
+        }
+
         return res.status(201).json({
             success: true,
-            message: "Notification created successfully.",
+            message: "Notification created and sent successfully.",
             data: notification
         });
     } catch (error) {
@@ -113,30 +158,49 @@ export const getUserNotifications = async (req, res) => {
         const skip = (page - 1) * limit;
         const { isRead } = req.query;
 
-        const query = {
-            $or: [
-                { recipient: req.user._id },
-                { recipient: null } // Broadcast notifications
+        const userRole = req.user.role;
+
+        // Build the query structure properly
+        const finalQuery = {
+            $and: [
+                {
+                    $or: [
+                        { recipient: req.user._id }, // Specific user notifications
+                        { 
+                            recipient: null,
+                            targetRole: null // Broadcast to all users
+                        },
+                        {
+                            recipient: null,
+                            targetRole: userRole // Role-based notifications
+                        }
+                    ]
+                },
+                {
+                    $or: [
+                        { expiresAt: null },
+                        { expiresAt: { $gt: new Date() } }
+                    ]
+                }
             ]
         };
 
-        if (isRead !== undefined) query.isRead = isRead === 'true';
+        if (isRead !== undefined) {
+            finalQuery.$and.push({ isRead: isRead === 'true' });
+        }
 
-        // Filter expired notifications
-        query.$or.push({ expiresAt: null });
-        query.$or.push({ expiresAt: { $gt: new Date() } });
-
-        const notifications = await Notification.find(query)
+        const notifications = await Notification.find(finalQuery)
             .populate("createdBy", "name")
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: -1 });
 
-        const total = await Notification.countDocuments(query);
-        const unreadCount = await Notification.countDocuments({
-            ...query,
-            isRead: false
-        });
+        const countQuery = { ...finalQuery };
+        const total = await Notification.countDocuments(countQuery);
+        
+        const unreadQuery = { ...finalQuery };
+        unreadQuery.$and.push({ isRead: false });
+        const unreadCount = await Notification.countDocuments(unreadQuery);
 
         return res.status(200).json({
             success: true,
