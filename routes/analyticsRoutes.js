@@ -1,14 +1,14 @@
 import express from 'express';
-import { getAnalytics } from '../controllers/analyticsController.js';
+import { getAnalyticsSummary, trackAnalyticsEvent } from '../controllers/analyticsController.js';
 import { auth, authorize } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-// All routes require admin access
-router.use(auth);
-router.use(authorize('admin'));
+// Admin routes
+router.get("/summary", auth, authorize('admin'), getAnalyticsSummary);
 
-router.get("/", getAnalytics);
+// Track event (authenticated users)
+router.post("/track", auth, trackAnalyticsEvent);
 
 export default router;
 

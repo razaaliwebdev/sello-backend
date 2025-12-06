@@ -23,15 +23,9 @@ const carSchema = new mongoose.Schema(
             enum: ["Petrol", "Diesel", "Hybrid", "Electric"],
         },
         engineCapacity: {
-            type: String,
+            type: Number,
             required: true,
-            enum: [
-                "0-999 CC",
-                "1000-1499 CC",
-                "1500-1999 CC",
-                "2000-2499 CC",
-                "2500+ CC",
-            ],
+            min: 0,
         },
         transmission: { type: String, required: true, enum: ["Manual", "Automatic"] },
         mileage: { type: Number, default: 0 },
@@ -114,12 +108,9 @@ const carSchema = new mongoose.Schema(
             },
         },
         horsepower: {
-            type: String,
-            default: "N/A",
-            validate: {
-                validator: (v) => v === "N/A" || /^\d+\s*HP$/.test(v),
-                message: "Horsepower must be in format 'X HP' or 'N/A'",
-            },
+            type: Number,
+            default: 0,
+            min: 0,
         },
         warranty: { type: String, required: true, enum: ["Yes", "No", "Doesn't Apply"] },
         numberOfCylinders: { type: Number, default: 4, max: 16 },
@@ -235,6 +226,14 @@ carSchema.index({ postedBy: 1 });
 carSchema.index({ featured: 1, isBoosted: 1 });
 carSchema.index({ isSold: 1, isApproved: 1 });
 carSchema.index({ status: 1, autoDeleteDate: 1, isAutoDeleted: 1 });
+// Text search indexes for keyword search
+carSchema.index({ title: "text", make: "text", model: "text", description: "text" });
+// Numeric indexes for range queries
+carSchema.index({ horsepower: 1 });
+carSchema.index({ engineCapacity: 1 });
+carSchema.index({ price: 1 });
+carSchema.index({ year: 1 });
+carSchema.index({ mileage: 1 });
 
 const Car = mongoose.model("Car", carSchema);
 

@@ -43,6 +43,22 @@ const userSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+        // Identity Verification (ID Card / Documents)
+        isVerified: {
+            type: Boolean,
+            default: false
+        },
+        // Seller Reputation
+        sellerRating: {
+            type: Number,
+            default: 0,
+            min: 0,
+            max: 5
+        },
+        reviewCount: {
+            type: Number,
+            default: 0
+        },
         status: {
             type: String,
             enum: ["active", "inactive", "suspended"],
@@ -146,6 +162,13 @@ const userSchema = new mongoose.Schema(
             {
                 type: mongoose.Schema.Types.ObjectId,
                 ref: "Car"
+            }
+        ],
+        // 🚫 Blocked users (for chat and interactions)
+        blockedUsers: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User"
             }
         ]
     },

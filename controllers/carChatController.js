@@ -400,6 +400,29 @@ export const sendCarChatMessage = async (req, res) => {
             });
         }
 
+        // Check if user is blocked by the other participant
+        const otherParticipantId = chat.participants.find(
+            p => p.toString() !== req.user._id.toString()
+        );
+        if (otherParticipantId) {
+            const otherUser = await User.findById(otherParticipantId).select("blockedUsers");
+            if (otherUser && otherUser.blockedUsers && otherUser.blockedUsers.includes(req.user._id)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You have been blocked by this user."
+                });
+            }
+            
+            // Check if current user has blocked the other participant
+            const currentUser = await User.findById(req.user._id).select("blockedUsers");
+            if (currentUser && currentUser.blockedUsers && currentUser.blockedUsers.includes(otherParticipantId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You have blocked this user. Unblock them to send messages."
+                });
+            }
+        }
+
         // Get car and check if sold
         const car = await Car.findById(chat.car).populate("postedBy", "name email role");
         if (car && car.isSold) {
@@ -495,6 +518,18 @@ export const sendCarChatMessage = async (req, res) => {
                 chat: chat,
                 chatId: chatId
             });
+        }
+
+        // Track analytics
+        try {
+            const { trackEvent, AnalyticsEvents } = await import('../utils/analytics.js');
+            await trackEvent(AnalyticsEvents.MESSAGE_SEND, req.user._id, {
+                chatId: chatId.toString(),
+                carId: car?._id?.toString()
+            });
+        } catch (analyticsError) {
+            // Don't fail the request if analytics fails
+            console.error('Failed to track analytics:', analyticsError);
         }
 
         return res.status(201).json({
@@ -701,6 +736,156 @@ export const deleteCarChatMessage = async (req, res) => {
         });
     } catch (error) {
         console.error("Delete Car Chat Message Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Block User in Chat
+ */
+export const blockUserInChat = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized."
+            });
+        }
+
+        const { userId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid user ID."
+            });
+        }
+
+        if (userId === req.user._id.toString()) {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot block yourself."
+            });
+        }
+
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        // Check if already blocked
+        if (user.blockedUsers && user.blockedUsers.includes(userId)) {
+            return res.status(200).json({
+                success: true,
+                message: "User is already blocked.",
+                data: { blocked: true }
+            });
+        }
+
+        // Add to blocked list
+        if (!user.blockedUsers) {
+            user.blockedUsers = [];
+        }
+        user.blockedUsers.push(userId);
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "User blocked successfully.",
+            data: { blocked: true }
+        });
+    } catch (error) {
+        console.error("Block User Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Unblock User
+ */
+export const unblockUser = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized."
+            });
+        }
+
+        const { userId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid user ID."
+            });
+        }
+
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        // Remove from blocked list
+        if (user.blockedUsers) {
+            user.blockedUsers = user.blockedUsers.filter(
+                id => id.toString() !== userId.toString()
+            );
+            await user.save();
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "User unblocked successfully.",
+            data: { blocked: false }
+        });
+    } catch (error) {
+        console.error("Unblock User Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Get Blocked Users
+ */
+export const getBlockedUsers = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized."
+            });
+        }
+
+        const user = await User.findById(req.user._id)
+            .select("blockedUsers")
+            .populate("blockedUsers", "name email avatar role");
+
+        return res.status(200).json({
+            success: true,
+            message: "Blocked users retrieved successfully.",
+            data: user.blockedUsers || []
+        });
+    } catch (error) {
+        console.error("Get Blocked Users Error:", error.message);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

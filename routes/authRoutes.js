@@ -13,7 +13,11 @@ import { upload } from '../middlewares/multer.js';
 const router = express.Router();
 
 // Public Authentication Routes
-router.post("/register", upload.single("avatar"), register);
+// Use fields for dealer registration (avatar + cnicFile)
+router.post("/register", upload.fields([
+    { name: 'avatar', maxCount: 1 },
+    { name: 'cnicFile', maxCount: 1 }
+]), register);
 router.post("/login", login);
 router.post("/forgot-password", forgotPassword);
 router.post("/verify-otp", verifyOtp);

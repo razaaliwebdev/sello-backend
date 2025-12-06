@@ -10,6 +10,7 @@ import {
     deleteCar,
     featureCar,
     getAllDealers,
+    verifyUser,
     verifyDealer,
     getListingHistory
 } from '../controllers/adminController.js';
@@ -29,6 +30,7 @@ router.get("/users", getAllUsers);
 router.get("/users/:userId", getUserById);
 router.put("/users/:userId", updateUser);
 router.delete("/users/:userId", deleteUser);
+router.put("/users/:userId/verify", verifyUser);
 
 // Listings (Cars) Management
 router.get("/listings", getAllCars);

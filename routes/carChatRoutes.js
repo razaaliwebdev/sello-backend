@@ -7,7 +7,10 @@ import {
     sendCarChatMessage,
     editCarChatMessage,
     deleteCarChatMessage,
-    getCarChatByCarId
+    getCarChatByCarId,
+    blockUserInChat,
+    unblockUser,
+    getBlockedUsers
 } from '../controllers/carChatController.js';
 import { auth } from '../middlewares/authMiddleware.js';
 import { upload } from '../middlewares/multer.js';
@@ -38,6 +41,11 @@ router.put("/messages/:messageId", editCarChatMessage);
 
 // Delete message (own messages only)
 router.delete("/messages/:messageId", deleteCarChatMessage);
+
+// Block/Unblock users
+router.post("/block/:userId", blockUserInChat);
+router.delete("/block/:userId", unblockUser);
+router.get("/blocked", getBlockedUsers);
 
 export default router;
 

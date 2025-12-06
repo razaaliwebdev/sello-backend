@@ -24,6 +24,11 @@ import testimonialRouter from './routes/testimonialRoutes.js';
 import roleRouter from './routes/roleRoutes.js';
 import uploadRouter from './routes/uploadRoutes.js';
 import newsletterRouter from './routes/newsletterRoutes.js';
+import reviewRouter from './routes/reviewRoutes.js';
+import recommendationsRouter from './routes/recommendationsRoutes.js';
+import subscriptionRouter from './routes/subscriptionRoutes.js';
+import { performanceMonitor } from './middlewares/performanceMiddleware.js';
+import Logger from './utils/logger.js';
 
 dotenv.config();
 
@@ -47,9 +52,23 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Performance monitoring
+app.use(performanceMonitor);
+
+// Security: Input sanitization middleware
+import { sanitizeInput } from './middlewares/sanitizeMiddleware.js';
+import { rateLimit, validateFileUpload } from './middlewares/securityMiddleware.js';
+// Exclude fields that should not be sanitized (passwords, tokens, HTML content from editors)
+app.use(sanitizeInput(['password', 'token', 'otp', 'content', 'description', 'message', 'geoLocation']));
+
+// Rate limiting (use Redis in production for distributed systems)
+if (process.env.NODE_ENV === 'production') {
+    app.use(rateLimit);
+}
 
 // ROUTES
 app.use("/api/auth", authRouter);
@@ -74,6 +93,9 @@ app.use("/api/testimonials", testimonialRouter);
 app.use("/api/roles", roleRouter);
 app.use("/api/upload", uploadRouter);
 app.use("/api/newsletter", newsletterRouter);
+app.use("/api/reviews", reviewRouter);
+app.use("/api/recommendations", recommendationsRouter);
+app.use("/api/subscriptions", subscriptionRouter);
 
 // Health check route
 app.get("/", (req, res) => {

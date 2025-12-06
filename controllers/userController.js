@@ -57,7 +57,7 @@ export const getUserProfile = async (req, res) => {
  */
 export const updateProfile = async (req, res) => {
     try {
-        const { name } = req.body;
+        const { name, phone } = req.body;
         const userId = req.user._id;
 
         // Find user
@@ -71,12 +71,64 @@ export const updateProfile = async (req, res) => {
 
         // Update name if provided
         if (name) {
-            user.name = name.trim();
+            const trimmedName = name.trim();
+            if (trimmedName.length < 2) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Name must be at least 2 characters."
+                });
+            }
+            if (trimmedName.length > 50) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Name cannot exceed 50 characters."
+                });
+            }
+            user.name = trimmedName;
+        }
+
+        // Update phone if provided
+        if (phone !== undefined) {
+            if (phone && phone.trim() !== '') {
+                // Basic phone validation
+                if (!/^\+?\d{9,15}$/.test(phone.trim())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Invalid phone number format."
+                    });
+                }
+                user.phone = phone.trim();
+            } else {
+                user.phone = null;
+            }
         }
 
         // Update avatar if provided
         if (req.file) {
-            const avatarUrl = await uploadCloudinary(req.file.buffer);
+            // Validate file type and size
+            const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+            const maxSize = 5 * 1024 * 1024; // 5MB for avatars
+            
+            if (!allowedTypes.includes(req.file.mimetype)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid file type. Only JPEG, PNG, and WebP are allowed."
+                });
+            }
+            
+            if (req.file.size > maxSize) {
+                return res.status(400).json({
+                    success: false,
+                    message: "File too large. Maximum size is 5MB."
+                });
+            }
+            
+            const avatarUrl = await uploadCloudinary(req.file.buffer, {
+                folder: "avatars",
+                removeExif: true,
+                quality: 80,
+                format: "auto"
+            });
             user.avatar = avatarUrl;
         }
 
@@ -89,9 +141,13 @@ export const updateProfile = async (req, res) => {
                 _id: user._id,
                 name: user.name,
                 email: user.email,
+                phone: user.phone,
                 avatar: user.avatar,
                 role: user.role,
                 status: user.status,
+                isVerified: user.isVerified,
+                sellerRating: user.sellerRating,
+                reviewCount: user.reviewCount,
                 boostCredits: user.boostCredits,
                 subscription: user.subscription
             }
@@ -112,7 +168,7 @@ export const updateProfile = async (req, res) => {
 export const getBoostCredits = async (req, res) => {
     try {
         const user = await User.findById(req.user._id).select("boostCredits subscription totalSpent paymentHistory");
-        
+
         return res.status(200).json({
             success: true,
             message: "Boost credits retrieved successfully.",
@@ -168,6 +224,17 @@ export const saveCar = async (req, res) => {
         // Add car to saved list
         user.savedCars.push(carId);
         await user.save();
+
+        // Track analytics
+        try {
+            const { trackEvent, AnalyticsEvents } = await import('../utils/analytics.js');
+            await trackEvent(AnalyticsEvents.LISTING_SAVE, req.user._id, {
+                carId: carId.toString()
+            });
+        } catch (analyticsError) {
+            // Don't fail the request if analytics fails
+            console.error('Failed to track analytics:', analyticsError);
+        }
 
         return res.status(200).json({
             success: true,
@@ -249,6 +316,125 @@ export const getSavedCars = async (req, res) => {
         });
     } catch (error) {
         console.error("Get Saved Cars Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Request Seller Status
+ * Allows buyers to upgrade to seller role
+ */
+export const requestSeller = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        if (user.role === 'seller') {
+            return res.status(400).json({
+                success: false,
+                message: "You are already a seller."
+            });
+        }
+
+        if (user.role === 'dealer') {
+            return res.status(400).json({
+                success: false,
+                message: "You are already a dealer. Dealers can create posts."
+            });
+        }
+
+        if (user.role === 'admin') {
+            return res.status(400).json({
+                success: false,
+                message: "Admins don't need seller status."
+            });
+        }
+
+        // Upgrade buyer to seller
+        user.role = 'seller';
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Successfully upgraded to seller. You can now create posts.",
+            data: {
+                role: user.role,
+                user: {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role
+                }
+            }
+        });
+    } catch (error) {
+        console.error("Request Seller Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Request Dealer Status
+ */
+export const requestDealer = async (req, res) => {
+    try {
+        const { businessName, businessLicense, businessAddress, businessPhone } = req.body;
+        const userId = req.user._id;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        if (user.role === 'dealer') {
+            return res.status(400).json({
+                success: false,
+                message: "You are already a dealer."
+            });
+        }
+
+        user.role = 'dealer';
+        user.isVerified = false;
+        user.dealerInfo = {
+            businessName,
+            businessLicense,
+            businessAddress,
+            businessPhone,
+            verified: false,
+            verifiedAt: null
+        };
+
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Dealer request submitted successfully. Pending admin verification.",
+            data: {
+                role: user.role,
+                isVerified: user.isVerified,
+                dealerInfo: user.dealerInfo
+            }
+        });
+    } catch (error) {
+        console.error("Request Dealer Error:", error.message);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

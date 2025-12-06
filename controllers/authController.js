@@ -38,7 +38,19 @@ const isValidPassword = (password) => {
  */
 export const register = async (req, res) => {
     try {
-        const { name, email, password, role } = req.body;
+        const { 
+            name, 
+            email, 
+            password, 
+            role,
+            // Dealer-specific fields
+            dealerName,
+            mobileNumber,
+            whatsappNumber,
+            city,
+            area,
+            vehicleTypes
+        } = req.body;
 
         // Validation
         if (!name || !email || !password) {
@@ -62,7 +74,9 @@ export const register = async (req, res) => {
             });
         }
 
-        if (!req.file) {
+        // Check for avatar file (handles both single and multiple file uploads)
+        const hasAvatar = req.file || (req.files && req.files.avatar && req.files.avatar[0]);
+        if (!hasAvatar) {
             return res.status(400).json({
                 success: false,
                 message: "Avatar image is required."
@@ -79,21 +93,56 @@ export const register = async (req, res) => {
         }
 
         // Upload avatar to Cloudinary
-        const avatarUrl = await uploadCloudinary(req.file.buffer);
+        // Handle both single file and files array
+        const avatarFile = req.file || (req.files && req.files.avatar && req.files.avatar[0]);
+        if (!avatarFile) {
+            return res.status(400).json({
+                success: false,
+                message: "Avatar image is required."
+            });
+        }
+        const avatarUrl = await uploadCloudinary(avatarFile.buffer);
+
+        // Upload CNIC/Business License if provided (for dealers)
+        let cnicUrl = null;
+        if (role === "dealer" && req.files && req.files.cnicFile && req.files.cnicFile[0]) {
+            cnicUrl = await uploadCloudinary(req.files.cnicFile[0].buffer);
+        }
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        // Create user
-        const user = await User.create({
+        // Prepare user data
+        const userData = {
             name: name.trim(),
             email: email.toLowerCase().trim(),
             avatar: avatarUrl,
             password: hashedPassword,
-            role: role === "seller" ? "seller" : "buyer",
+            role: role === "dealer" ? "dealer" : (role === "seller" ? "seller" : "buyer"),
             status: "active",
             isEmailVerified: false
-        });
+        };
+
+        // Add dealer-specific information
+        if (role === "dealer") {
+            userData.dealerInfo = {
+                businessName: dealerName || name,
+                businessLicense: cnicUrl || null,
+                businessAddress: area ? `${area}, ${city}` : null,
+                businessPhone: mobileNumber || null,
+                whatsappNumber: whatsappNumber || null,
+                city: city || null,
+                area: area || null,
+                vehicleTypes: vehicleTypes || null,
+                verified: false,
+                verifiedAt: null
+            };
+            // Also store in main user fields for easy access
+            userData.phone = mobileNumber;
+        }
+
+        // Create user
+        const user = await User.create(userData);
 
         // Generate token
         const token = generateToken(user._id, user.email);

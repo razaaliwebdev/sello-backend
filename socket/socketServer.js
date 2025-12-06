@@ -7,6 +7,7 @@ import { generateChatbotResponse } from '../utils/chatbot.js';
 // Store active users and their socket connections
 const activeUsers = new Map(); // userId -> socketId
 const typingUsers = new Map(); // chatId -> Set of userIds typing
+const liveLocationTrackers = new Map(); // userId -> { carId, location, isActive }
 
 export const initializeSocket = (server) => {
     const io = new Server(server, {
@@ -23,10 +24,10 @@ export const initializeSocket = (server) => {
     // Authentication middleware for Socket.io
     io.use(async (socket, next) => {
         try {
-            const token = socket.handshake.auth?.token || 
-                         socket.handshake.headers?.authorization?.split(' ')[1] ||
-                         socket.handshake.query?.token;
-            
+            const token = socket.handshake.auth?.token ||
+                socket.handshake.headers?.authorization?.split(' ')[1] ||
+                socket.handshake.query?.token;
+
             if (!token) {
                 console.log('Socket connection attempt without token');
                 return next(new Error('Authentication error: No token provided'));
@@ -35,7 +36,7 @@ export const initializeSocket = (server) => {
             try {
                 const decoded = jwt.verify(token, process.env.JWT_SECRET);
                 const user = await User.findById(decoded.id).select('-password');
-                
+
                 if (!user) {
                     return next(new Error('Authentication error: User not found'));
                 }
@@ -58,7 +59,7 @@ export const initializeSocket = (server) => {
 
         // Store user's socket connection
         activeUsers.set(socket.userId, socket.id);
-        
+
         // Join user's personal room
         socket.join(`user:${socket.userId}`);
 
@@ -104,19 +105,19 @@ export const initializeSocket = (server) => {
                     console.error('No chatId provided to join-chat');
                     return;
                 }
-                
+
                 const chat = await Chat.findById(chatId);
                 if (!chat) {
                     console.error('Chat not found:', chatId);
                     return;
                 }
-                
+
                 // Check if user is participant (convert to string for comparison)
                 const userIdStr = socket.userId.toString();
-                const isParticipant = chat.participants.some(p => 
+                const isParticipant = chat.participants.some(p =>
                     p.toString() === userIdStr || p._id?.toString() === userIdStr
                 );
-                
+
                 if (isParticipant) {
                     socket.join(`chat:${chatId}`);
                     socket.emit('joined-chat', chatId);
@@ -185,7 +186,7 @@ export const initializeSocket = (server) => {
 
                 // Check if user is participant (convert to string for comparison)
                 const userIdStr = socket.userId.toString();
-                const isParticipant = chat.participants.some(p => 
+                const isParticipant = chat.participants.some(p =>
                     p.toString() === userIdStr || p._id?.toString() === userIdStr
                 );
 
@@ -211,7 +212,7 @@ export const initializeSocket = (server) => {
                 chat.lastMessage = message.trim();
                 chat.lastMessageAt = new Date();
                 chat.isActive = true;
-                
+
                 // Update unread count for other participants
                 chat.participants.forEach(participantId => {
                     if (participantId.toString() !== socket.userId) {
@@ -234,10 +235,10 @@ export const initializeSocket = (server) => {
                     try {
                         const Car = (await import('../models/carModel.js')).default;
                         const Notification = (await import('../models/notificationModel.js')).default;
-                        
+
                         const car = await Car.findById(chat.car).populate("postedBy", "name email role");
                         const seller = car?.postedBy;
-                        
+
                         if (seller && seller._id.toString() !== socket.userId.toString()) {
                             // Create notification
                             await Notification.create({
@@ -331,6 +332,34 @@ export const initializeSocket = (server) => {
             }
         });
 
+        // Handle mark chat as read (Bulk)
+        socket.on('mark-chat-read', async ({ chatId }) => {
+            try {
+                const chat = await Chat.findById(chatId);
+                if (!chat) return;
+
+                // Reset unread count for this user
+                if (chat.unreadCount && chat.unreadCount.has(socket.userId)) {
+                    chat.unreadCount.set(socket.userId, 0);
+                    await chat.save();
+                }
+
+                // Mark all messages as seen by this user
+                await Message.updateMany(
+                    { chat: chatId, seenBy: { $ne: socket.userId } },
+                    { $addToSet: { seenBy: socket.userId } }
+                );
+
+                // Emit update
+                io.to(`chat:${chatId}`).emit('chat-read', {
+                    chatId,
+                    userId: socket.userId
+                });
+            } catch (error) {
+                console.error('Error marking chat as read:', error);
+            }
+        });
+
         // Handle delete message
         socket.on('delete-message', async ({ messageId, chatId }) => {
             try {
@@ -361,11 +390,132 @@ export const initializeSocket = (server) => {
             }
         });
 
+        // Live Location Tracking - Seller enables live location for a car
+        socket.on('enable-live-location', async ({ carId, location }) => {
+            try {
+                if (!carId || !location || !location.coordinates) {
+                    socket.emit('error', { message: 'Car ID and location are required' });
+                    return;
+                }
+
+                // Verify user owns the car
+                const Car = (await import('../models/carModel.js')).default;
+                const car = await Car.findById(carId);
+                
+                if (!car || car.postedBy.toString() !== socket.userId) {
+                    socket.emit('error', { message: 'Unauthorized: You do not own this car' });
+                    return;
+                }
+
+                // Store live location tracking
+                liveLocationTrackers.set(socket.userId, {
+                    carId,
+                    location: {
+                        type: 'Point',
+                        coordinates: location.coordinates // [longitude, latitude]
+                    },
+                    isActive: true,
+                    updatedAt: new Date()
+                });
+
+                // Join car-specific room for location updates
+                socket.join(`car-location:${carId}`);
+                
+                // Notify buyers viewing this car
+                io.to(`car-location:${carId}`).emit('live-location-enabled', {
+                    carId,
+                    location: liveLocationTrackers.get(socket.userId).location
+                });
+
+                socket.emit('live-location-enabled', { carId });
+                console.log(`Live location enabled for car ${carId} by user ${socket.userId}`);
+            } catch (error) {
+                console.error('Error enabling live location:', error);
+                socket.emit('error', { message: 'Failed to enable live location' });
+            }
+        });
+
+        // Update live location (seller sends periodic updates)
+        socket.on('update-live-location', ({ carId, location }) => {
+            try {
+                const tracker = liveLocationTrackers.get(socket.userId);
+                if (!tracker || tracker.carId !== carId || !tracker.isActive) {
+                    socket.emit('error', { message: 'Live location not enabled for this car' });
+                    return;
+                }
+
+                // Update location
+                tracker.location = {
+                    type: 'Point',
+                    coordinates: location.coordinates // [longitude, latitude]
+                };
+                tracker.updatedAt = new Date();
+
+                // Broadcast to buyers viewing this car
+                io.to(`car-location:${carId}`).emit('live-location-update', {
+                    carId,
+                    location: tracker.location,
+                    updatedAt: tracker.updatedAt
+                });
+            } catch (error) {
+                console.error('Error updating live location:', error);
+                socket.emit('error', { message: 'Failed to update live location' });
+            }
+        });
+
+        // Disable live location
+        socket.on('disable-live-location', ({ carId }) => {
+            try {
+                const tracker = liveLocationTrackers.get(socket.userId);
+                if (tracker && tracker.carId === carId) {
+                    tracker.isActive = false;
+                    liveLocationTrackers.delete(socket.userId);
+                    
+                    // Notify buyers
+                    io.to(`car-location:${carId}`).emit('live-location-disabled', { carId });
+                    socket.emit('live-location-disabled', { carId });
+                    console.log(`Live location disabled for car ${carId} by user ${socket.userId}`);
+                }
+            } catch (error) {
+                console.error('Error disabling live location:', error);
+            }
+        });
+
+        // Buyer subscribes to live location updates for a car
+        socket.on('subscribe-car-location', ({ carId }) => {
+            try {
+                socket.join(`car-location:${carId}`);
+                
+                // Send current location if available
+                const tracker = Array.from(liveLocationTrackers.values())
+                    .find(t => t.carId === carId && t.isActive);
+                
+                if (tracker) {
+                    socket.emit('live-location-update', {
+                        carId,
+                        location: tracker.location,
+                        updatedAt: tracker.updatedAt
+                    });
+                }
+            } catch (error) {
+                console.error('Error subscribing to car location:', error);
+            }
+        });
+
+        // Buyer unsubscribes from live location updates
+        socket.on('unsubscribe-car-location', ({ carId }) => {
+            try {
+                socket.leave(`car-location:${carId}`);
+            } catch (error) {
+                console.error('Error unsubscribing from car location:', error);
+            }
+        });
+
         // Handle disconnect
         socket.on('disconnect', () => {
             console.log(`User disconnected: ${socket.userId}`);
             activeUsers.delete(socket.userId);
-            
+
             // Remove from typing indicators
             typingUsers.forEach((userSet, chatId) => {
                 userSet.delete(socket.userId);
@@ -373,6 +523,15 @@ export const initializeSocket = (server) => {
                     typingUsers.delete(chatId);
                 }
             });
+
+            // Clean up live location tracking
+            const tracker = liveLocationTrackers.get(socket.userId);
+            if (tracker) {
+                io.to(`car-location:${tracker.carId}`).emit('live-location-disabled', {
+                    carId: tracker.carId
+                });
+                liveLocationTrackers.delete(socket.userId);
+            }
         });
     });
 

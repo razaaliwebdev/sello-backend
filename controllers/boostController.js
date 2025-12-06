@@ -86,18 +86,43 @@ export const boostPost = async (req, res) => {
             req.user.boostCredits -= cost;
             await req.user.save({ validateBeforeSave: false });
         } else {
-            // In a real app, you would process payment here
-            // For now, we'll just record the payment
-            req.user.paymentHistory.push({
-                amount: cost,
-                currency: "USD",
-                paymentMethod: paymentMethod || "card",
-                transactionId: transactionId || `TXN-${Date.now()}`,
-                purpose: "boost",
-                status: "completed"
-            });
-            req.user.totalSpent += cost;
-            await req.user.save({ validateBeforeSave: false });
+            // Process Payment via Payment Service
+            try {
+                // Import payment service
+                const { verifyPayment } = await import('../services/paymentService.js');
+                
+                // If we already have a transactionId from frontend, verify it
+                if (!transactionId) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Payment transaction ID is required."
+                    });
+                }
+
+                // Verify the transaction with the payment gateway
+                const payment = await verifyPayment(transactionId);
+                if (!payment.verified || payment.status !== 'succeeded') {
+                    throw new Error("Payment not successful or not verified");
+                }
+
+                req.user.paymentHistory.push({
+                    amount: cost,
+                    currency: "USD",
+                    paymentMethod: paymentMethod || "card",
+                    transactionId: transactionId,
+                    purpose: "boost",
+                    status: "completed"
+                });
+                req.user.totalSpent += cost;
+                await req.user.save({ validateBeforeSave: false });
+
+            } catch (paymentError) {
+                console.error("Payment processing error:", paymentError);
+                return res.status(400).json({
+                    success: false,
+                    message: "Payment failed: " + paymentError.message
+                });
+            }
         }
 
         // Calculate expiry date
@@ -117,6 +142,20 @@ export const boostPost = async (req, res) => {
         });
 
         await car.save();
+
+        // Track analytics
+        try {
+            const { trackEvent, AnalyticsEvents } = await import('../utils/analytics.js');
+            await trackEvent(AnalyticsEvents.BOOST_PURCHASE, req.user._id, {
+                carId: car._id.toString(),
+                duration: days,
+                cost: cost,
+                paymentMethod: req.body.useCredits ? 'credits' : 'payment'
+            });
+        } catch (analyticsError) {
+            // Don't fail the request if analytics fails
+            console.error('Failed to track analytics:', analyticsError);
+        }
 
         return res.status(200).json({
             success: true,

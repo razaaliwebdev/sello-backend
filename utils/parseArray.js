@@ -13,15 +13,24 @@ export const buildCarQuery = (query) => {
         throw new Error('Invalid query parameters');
     }
 
-    // General search by title (case-insensitive)
-    if (query.search) {
-        if (typeof query.search !== 'string' || query.search.trim() === '') {
-            throw new Error('Invalid search parameter');
+    // Keyword/text search - search across multiple fields
+    if (query.search || query.keyword || query.q) {
+        const searchTerm = (query.search || query.keyword || query.q).trim();
+        if (searchTerm) {
+            // Use $or to search across multiple fields for better results
+            filter.$or = [
+                { title: { $regex: searchTerm, $options: 'i' } },
+                { make: { $regex: searchTerm, $options: 'i' } },
+                { model: { $regex: searchTerm, $options: 'i' } },
+                { description: { $regex: searchTerm, $options: 'i' } },
+                { city: { $regex: searchTerm, $options: 'i' } },
+                { location: { $regex: searchTerm, $options: 'i' } }
+            ];
         }
-        filter.title = { $regex: query.search.trim(), $options: 'i' };
     }
 
-    // Text search with case-insensitive matching
+    // Text search with case-insensitive matching (only if not using keyword search)
+    if (!query.search && !query.keyword && !query.q) {
     const textFilters = ['make', 'model', 'city', 'variant', 'description', 'location'];
     textFilters.forEach(field => {
         if (query[field]) {
@@ -31,6 +40,7 @@ export const buildCarQuery = (query) => {
             filter[field] = { $regex: query[field].trim(), $options: 'i' };
         }
     });
+    }
 
     // Enum validation for single-value fields
     const enumFields = {
@@ -74,50 +84,28 @@ export const buildCarQuery = (query) => {
         }
     });
 
-    // Engine capacity range (map enum to numeric ranges)
-    const engineRanges = {
-        "0-999 CC": { min: 0, max: 999 },
-        "1000-1499 CC": { min: 1000, max: 1499 },
-        "1500-1999 CC": { min: 1500, max: 1999 },
-        "2000-2499 CC": { min: 2000, max: 2499 },
-        "2500+ CC": { min: 2500, max: Infinity }
-    };
-
+    // Engine capacity range (numeric)
     if (query.engineMin || query.engineMax) {
         const engineMin = query.engineMin ? Number(query.engineMin) : 0;
         const engineMax = query.engineMax ? Number(query.engineMax) : Infinity;
-        if (isNaN(engineMin) || isNaN(engineMax)) {
-            throw new Error('Invalid engine capacity range');
-        }
-        const possibleCapacities = [];
-        for (const [key, { min, max }] of Object.entries(engineRanges)) {
-            if (engineMin <= max && engineMax >= min) {
-                possibleCapacities.push(key);
-            }
-        }
-        if (possibleCapacities.length > 0) {
-            filter.engineCapacity = { $in: possibleCapacities };
-        } else {
-            filter.engineCapacity = { $exists: false }; // No matches
+        
+        if (!isNaN(engineMin) || !isNaN(engineMax)) {
+            filter.engineCapacity = {};
+            if (!isNaN(engineMin)) filter.engineCapacity.$gte = engineMin;
+            if (!isNaN(engineMax) && engineMax !== Infinity) filter.engineCapacity.$lte = engineMax;
         }
     }
 
-    // Horsepower range (use $in with generated string values)
+    // Horsepower range (numeric)
     if (query.hpMin || query.hpMax) {
         const hpMin = query.hpMin ? Number(query.hpMin) : 0;
         const hpMax = query.hpMax ? Number(query.hpMax) : Infinity;
-        if (isNaN(hpMin) || isNaN(hpMax)) {
-            throw new Error('Invalid horsepower range');
+        
+        if (!isNaN(hpMin) || !isNaN(hpMax)) {
+            filter.horsepower = {};
+            if (!isNaN(hpMin)) filter.horsepower.$gte = hpMin;
+            if (!isNaN(hpMax) && hpMax !== Infinity) filter.horsepower.$lte = hpMax;
         }
-        // Cap range to prevent performance issues (e.g., max 1000 values)
-        if (hpMax - hpMin > 1000) {
-            throw new Error('Horsepower range too large (max 1000)');
-        }
-        const hpValues = [];
-        for (let i = Math.max(0, Math.floor(hpMin)); i <= Math.min(hpMax, 10000); i++) {
-            hpValues.push(`${i} HP`);
-        }
-        filter.horsepower = { $in: hpValues, $ne: "N/A" };
     }
 
     // Numeric range filters
@@ -146,5 +134,24 @@ export const buildCarQuery = (query) => {
         }
     });
 
-    return filter;
+    // Location radius filter - return separately as it requires geospatial query
+    const locationFilter = {};
+    if (query.radius && query.userLat && query.userLng) {
+        const radius = Number(query.radius);
+        const userLat = Number(query.userLat);
+        const userLng = Number(query.userLng);
+
+        if (!isNaN(radius) && !isNaN(userLat) && !isNaN(userLng) && radius > 0) {
+            // Validate coordinates
+            if (userLat >= -90 && userLat <= 90 && userLng >= -180 && userLng <= 180) {
+                locationFilter.radius = radius; // in kilometers
+                locationFilter.userLocation = {
+                    type: 'Point',
+                    coordinates: [userLng, userLat] // MongoDB format: [longitude, latitude]
+                };
+            }
+        }
+    }
+
+    return { filter, locationFilter };
 };

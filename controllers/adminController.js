@@ -21,7 +21,7 @@ export const getDashboardStats = async (req, res) => {
         const now = new Date();
         const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        
+
         const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
 
@@ -164,14 +164,14 @@ export const getDashboardStats = async (req, res) => {
             const date = new Date(currentYear, currentMonth - i, 1);
             const monthIndex = date.getMonth();
             const year = date.getFullYear();
-            
-            const salesData = salesTrends.find(s => 
+
+            const salesData = salesTrends.find(s =>
                 s._id.month === monthIndex + 1 && s._id.year === year
             );
-            const userData = userGrowth.find(u => 
+            const userData = userGrowth.find(u =>
                 u._id.month === monthIndex + 1 && u._id.year === year
             );
-            
+
             salesTrendsData.push({
                 month: monthNames[monthIndex],
                 sales: salesData?.count || 0,
@@ -185,6 +185,12 @@ export const getDashboardStats = async (req, res) => {
                 activeUsers: userData?.activeUsers || 0
             });
         }
+
+        // Get pending verifications count
+        const pendingVerifications = await User.countDocuments({
+            role: 'dealer',
+            isVerified: false
+        });
 
         return res.status(200).json({
             success: true,
@@ -210,9 +216,9 @@ export const getDashboardStats = async (req, res) => {
                         icon: "listings"
                     },
                     {
-                        title: "Customer Requests",
-                        value: customerRequests,
-                        change: calculatePercentageChange(currentMonthCustomerRequests, lastMonthCustomerRequests),
+                        title: "Pending Verifications",
+                        value: pendingVerifications,
+                        change: 0, // Real-time metric, no history yet
                         icon: "requests"
                     },
                     {
@@ -236,7 +242,8 @@ export const getDashboardStats = async (req, res) => {
                     totalDealers,
                     customerRequests,
                     totalCarsSold,
-                    totalRevenue: revenue
+                    totalRevenue: revenue,
+                    pendingVerifications
                 }
             }
         });
@@ -246,6 +253,50 @@ export const getDashboardStats = async (req, res) => {
             success: false,
             message: "Server error. Please try again later.",
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Verify User (Admin)
+ */
+export const verifyUser = async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: "Only admins can verify users."
+            });
+        }
+
+        const { userId } = req.params;
+        const { isVerified } = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        user.isVerified = isVerified;
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `User ${isVerified ? 'verified' : 'unverified'} successfully.`,
+            data: {
+                _id: user._id,
+                name: user.name,
+                isVerified: user.isVerified
+            }
+        });
+    } catch (error) {
+        console.error("Verify User Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later."
         });
     }
 };
@@ -269,7 +320,7 @@ export const getAllUsers = async (req, res) => {
 
         // Build query
         const query = {};
-        
+
         // Handle role filter - special case for admin to include team members
         if (role === 'admin') {
             // Fetch users with role='admin' OR those who have adminRole set (team members)
@@ -281,36 +332,36 @@ export const getAllUsers = async (req, res) => {
             // For regular users (buyers, sellers, dealers) - exclude admins
             // Build conditions using $and
             const conditions = [];
-            
+
             // Exclude users where role is 'admin'
             conditions.push({ role: { $ne: 'admin' } });
-            
+
             // Exclude users with adminRole set (team members have adminRole as string)
             // Regular users have adminRole: null (default)
             // Use $in with null to match null values, or check if field doesn't exist
-            conditions.push({ 
+            conditions.push({
                 $or: [
                     { adminRole: null },
                     { adminRole: { $exists: false } }
                 ]
             });
-            
+
             // If specific role is requested, add it
             if (role) {
                 conditions.push({ role: role });
             }
-            
+
             // Combine all conditions with $and
             query.$and = conditions;
         }
-        
+
         // Debug: Log the query structure (always log for troubleshooting)
         console.log('=== USER QUERY DEBUG ===');
         console.log('Role filter:', role);
         console.log('Status filter:', status);
         console.log('Search:', search);
         console.log('Query:', JSON.stringify(query, null, 2));
-        
+
         // Add status filter
         if (status) {
             if (query.$and) {
@@ -319,14 +370,14 @@ export const getAllUsers = async (req, res) => {
                 query.status = status;
             }
         }
-        
+
         // Handle search - combine with existing query conditions
         if (search) {
             const searchConditions = [
                 { name: { $regex: search, $options: 'i' } },
                 { email: { $regex: search, $options: 'i' } }
             ];
-            
+
             if (query.$and) {
                 query.$and.push({ $or: searchConditions });
             } else if (query.$or) {
@@ -349,14 +400,14 @@ export const getAllUsers = async (req, res) => {
             .sort({ createdAt: -1 });
 
         const total = await User.countDocuments(query);
-        
+
         // Debug: Log results for troubleshooting (always log)
         console.log(`Found ${users.length} users (total: ${total})`);
         if (users.length > 0) {
-            console.log('Sample user roles:', users.slice(0, 3).map(u => ({ 
-                name: u.name, 
-                role: u.role, 
-                adminRole: u.adminRole 
+            console.log('Sample user roles:', users.slice(0, 3).map(u => ({
+                name: u.name,
+                role: u.role,
+                adminRole: u.adminRole
             })));
         } else {
             console.log('No users found with query:', JSON.stringify(query, null, 2));
@@ -569,7 +620,7 @@ export const getAllCars = async (req, res) => {
 
         // Build query
         const query = {};
-        
+
         // Status filter: all, pending, approved, rejected, sold
         if (status && status !== 'all') {
             if (status === 'sold') {
@@ -590,12 +641,12 @@ export const getAllCars = async (req, res) => {
                 ];
             }
         }
-        
+
         // Brand filter
         if (brand && brand !== 'all') {
             query.make = { $regex: brand, $options: 'i' };
         }
-        
+
         // Search filter
         if (search) {
             query.$or = [
@@ -707,78 +758,78 @@ export const approveCar = async (req, res) => {
  * Delete Car (Admin)
  */
 export const deleteCar = async (req, res) => {
-  try {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Only admins can delete cars.",
-      });
-    }
-
-    const { carId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(carId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid car ID.",
-      });
-    }
-
-    const car = await Car.findById(carId);
-    if (!car) {
-      return res.status(404).json({
-        success: false,
-        message: "Car not found.",
-      });
-    }
-
-    // Create history record BEFORE deletion (no images)
     try {
-      await ListingHistory.create({
-        oldListingId: car._id,
-        title: car.title,
-        make: car.make,
-        model: car.model,
-        year: car.year,
-        mileage: car.mileage,
-        finalStatus: car.isSold ? "sold" : "deleted",
-        finalSellingDate: car.soldAt || car.soldDate || null,
-        sellerUser: car.postedBy,
-        isAutoDeleted: false,
-        deletedBy: req.user._id,
-        deletedAt: new Date(),
-      });
-    } catch (historyError) {
-      console.error("Failed to create listing history on admin delete:", historyError);
-      // Do not block deletion if history fails, but log it
+        if (req.user.role !== "admin") {
+            return res.status(403).json({
+                success: false,
+                message: "Only admins can delete cars.",
+            });
+        }
+
+        const { carId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(carId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid car ID.",
+            });
+        }
+
+        const car = await Car.findById(carId);
+        if (!car) {
+            return res.status(404).json({
+                success: false,
+                message: "Car not found.",
+            });
+        }
+
+        // Create history record BEFORE deletion (no images)
+        try {
+            await ListingHistory.create({
+                oldListingId: car._id,
+                title: car.title,
+                make: car.make,
+                model: car.model,
+                year: car.year,
+                mileage: car.mileage,
+                finalStatus: car.isSold ? "sold" : "deleted",
+                finalSellingDate: car.soldAt || car.soldDate || null,
+                sellerUser: car.postedBy,
+                isAutoDeleted: false,
+                deletedBy: req.user._id,
+                deletedAt: new Date(),
+            });
+        } catch (historyError) {
+            console.error("Failed to create listing history on admin delete:", historyError);
+            // Do not block deletion if history fails, but log it
+        }
+
+        // Mark as deleted in case any references remain, then remove
+        car.status = "deleted";
+        car.deletedAt = new Date();
+        car.deletedBy = req.user._id;
+        await car.save({ validateBeforeSave: false });
+
+        // Remove car from user's carsPosted array
+        await User.findByIdAndUpdate(car.postedBy, {
+            $pull: { carsPosted: carId },
+        });
+
+        await car.deleteOne();
+
+        return res.status(200).json({
+            success: true,
+            message: "Car deleted successfully.",
+        });
+    } catch (error) {
+        console.error("Delete Car (Admin) Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error:
+                process.env.NODE_ENV === "development" ? error.message : undefined,
+        });
     }
-
-    // Mark as deleted in case any references remain, then remove
-    car.status = "deleted";
-    car.deletedAt = new Date();
-    car.deletedBy = req.user._id;
-    await car.save({ validateBeforeSave: false });
-
-    // Remove car from user's carsPosted array
-    await User.findByIdAndUpdate(car.postedBy, {
-      $pull: { carsPosted: carId },
-    });
-
-    await car.deleteOne();
-
-    return res.status(200).json({
-      success: true,
-      message: "Car deleted successfully.",
-    });
-  } catch (error) {
-    console.error("Delete Car (Admin) Error:", error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Server error. Please try again later.",
-      error:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
 };
 
 /**
@@ -789,90 +840,90 @@ export const deleteCar = async (req, res) => {
  * - from / to: date range on finalSellingDate / deletedAt
  */
 export const getListingHistory = async (req, res) => {
-  try {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Only admins can view listing history.",
-      });
+    try {
+        if (req.user.role !== "admin") {
+            return res.status(403).json({
+                success: false,
+                message: "Only admins can view listing history.",
+            });
+        }
+
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 20;
+        const skip = (page - 1) * limit;
+
+        const { status, isAutoDeleted, from, to, search } = req.query;
+
+        // Build a plain JavaScript query object (this used to have TypeScript-only syntax)
+        const query = {};
+
+        if (status && status !== "all") {
+            query.finalStatus = status;
+        }
+
+        if (isAutoDeleted === "true") {
+            query.isAutoDeleted = true;
+        } else if (isAutoDeleted === "false") {
+            query.isAutoDeleted = false;
+        }
+
+        if (from || to) {
+            const dateFilter = {};
+            if (from) {
+                dateFilter.$gte = new Date(from);
+            }
+            if (to) {
+                dateFilter.$lte = new Date(to);
+            }
+            // Prefer sold date if present, fall back to deletedAt
+            query.$or = [
+                { finalSellingDate: dateFilter },
+                { finalSellingDate: null, deletedAt: dateFilter },
+            ];
+        }
+
+        if (search && typeof search === "string" && search.trim().length > 0) {
+            const regex = new RegExp(search.trim(), "i");
+            query.$or = [
+                ...(query.$or || []),
+                { title: regex },
+                { make: regex },
+                { model: regex },
+            ];
+        }
+
+        const [history, total] = await Promise.all([
+            ListingHistory.find(query)
+                .populate("sellerUser", "name email role")
+                .populate("deletedBy", "name email role")
+                .sort({ deletedAt: -1 })
+                .skip(skip)
+                .limit(limit),
+            ListingHistory.countDocuments(query),
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            message: "Listing history retrieved successfully.",
+            data: {
+                history,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    pages: Math.ceil(total / limit),
+                },
+            },
+        });
+    } catch (error) {
+        console.error("Get Listing History Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error:
+                process.env.NODE_ENV === "development" ? error.message : undefined,
+        });
     }
-
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 20;
-    const skip = (page - 1) * limit;
-
-    const { status, isAutoDeleted, from, to, search } = req.query;
-
-    // Build a plain JavaScript query object (this used to have TypeScript-only syntax)
-    const query = {};
-
-    if (status && status !== "all") {
-      query.finalStatus = status;
-    }
-
-    if (isAutoDeleted === "true") {
-      query.isAutoDeleted = true;
-    } else if (isAutoDeleted === "false") {
-      query.isAutoDeleted = false;
-    }
-
-    if (from || to) {
-      const dateFilter = {};
-      if (from) {
-        dateFilter.$gte = new Date(from);
-      }
-      if (to) {
-        dateFilter.$lte = new Date(to);
-      }
-      // Prefer sold date if present, fall back to deletedAt
-      query.$or = [
-        { finalSellingDate: dateFilter },
-        { finalSellingDate: null, deletedAt: dateFilter },
-      ];
-    }
-
-    if (search && typeof search === "string" && search.trim().length > 0) {
-      const regex = new RegExp(search.trim(), "i");
-      query.$or = [
-        ...(query.$or || []),
-        { title: regex },
-        { make: regex },
-        { model: regex },
-      ];
-    }
-
-    const [history, total] = await Promise.all([
-      ListingHistory.find(query)
-        .populate("sellerUser", "name email role")
-        .populate("deletedBy", "name email role")
-        .sort({ deletedAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      ListingHistory.countDocuments(query),
-    ]);
-
-    return res.status(200).json({
-      success: true,
-      message: "Listing history retrieved successfully.",
-      data: {
-        history,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Get Listing History Error:", error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Server error. Please try again later.",
-      error:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
 };
 
 /**
@@ -946,7 +997,7 @@ export const getAllDealers = async (req, res) => {
 
         // Build query
         const query = { role: 'dealer' };
-        if (verified !== undefined) query['dealerInfo.verified'] = verified === 'true';
+        if (verified !== undefined) query['isVerified'] = verified === 'true';
         if (search) {
             query.$or = [
                 { name: { $regex: search, $options: 'i' } },
@@ -967,11 +1018,11 @@ export const getAllDealers = async (req, res) => {
         const dealersWithStats = await Promise.all(
             dealers.map(async (dealer) => {
                 const listingsCount = await Car.countDocuments({ postedBy: dealer._id });
-                const salesCount = await Car.countDocuments({ 
-                    postedBy: dealer._id, 
-                    isSold: true 
+                const salesCount = await Car.countDocuments({
+                    postedBy: dealer._id,
+                    isSold: true
                 });
-                
+
                 return {
                     ...dealer.toObject(),
                     listingsCount,
