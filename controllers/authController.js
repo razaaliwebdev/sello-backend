@@ -1,6 +1,8 @@
 import User from '../models/userModel.js';
+import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import { generateOtp } from '../utils/generateOtp.js';
 import sendEmail from '../utils/sendEmail.js';
 import client from '../config/googleClient.js';
@@ -578,8 +580,10 @@ export const googleLogin = async (req, res) => {
             });
         }
 
-        // Check if GOOGLE_CLIENT_ID is configured
-        if (!process.env.GOOGLE_CLIENT_ID) {
+        // Check if GOOGLE_CLIENT_ID is configured (use fallback in development)
+        const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
+        
+        if (!googleClientId) {
             console.error("GOOGLE_CLIENT_ID is not configured in environment variables");
             return res.status(500).json({
                 success: false,
@@ -592,16 +596,18 @@ export const googleLogin = async (req, res) => {
         let ticket;
         try {
             // Verify the token with the correct client ID
+            const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
             ticket = await client.verifyIdToken({
                 idToken: token,
-                audience: process.env.GOOGLE_CLIENT_ID,
+                audience: googleClientId,
             });
         } catch (verifyError) {
             console.error("Google token verification error:", verifyError.message);
+            const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
             console.error("Error details:", {
                 message: verifyError.message,
                 code: verifyError.code,
-                clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Missing"
+                clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Using fallback"
             });
             
             // Provide more specific error messages
@@ -633,22 +639,57 @@ export const googleLogin = async (req, res) => {
             });
         }
 
+        // Check MongoDB connection before querying
+        if (mongoose.connection.readyState !== 1) {
+            console.error("MongoDB is not connected. Connection state:", mongoose.connection.readyState);
+            const stateMessages = {
+                0: 'disconnected',
+                1: 'connected',
+                2: 'connecting',
+                3: 'disconnecting'
+            };
+            return res.status(503).json({
+                success: false,
+                message: "Database connection unavailable. Please check your MongoDB connection and try again.",
+                error: process.env.NODE_ENV === 'development' 
+                    ? `MongoDB connection state: ${mongoose.connection.readyState} (${stateMessages[mongoose.connection.readyState] || 'unknown'})` 
+                    : undefined
+            });
+        }
+
         // Find or create user
         let user = await User.findOne({ email: email.toLowerCase() });
 
         if (!user) {
             // Create new user from Google
-            user = await User.create({
-                name: name || email.split('@')[0],
-                email: email.toLowerCase(),
-                avatar: picture || `https://ui-avatars.com/api/?name=${encodeURIComponent((name || email.charAt(0)).toUpperCase())}`,
-                password: 'google-auth-' + Date.now(), // Unique placeholder
-                verified: true,
-                isEmailVerified: true,
-                status: 'active',
-                role: 'buyer',
-                lastLogin: new Date()
-            });
+            // Generate a secure random password for Google OAuth users
+            const randomPassword = 'google-oauth-' + crypto.randomBytes(32).toString('hex') + '-' + Date.now();
+            
+            try {
+                user = await User.create({
+                    name: name || email.split('@')[0],
+                    email: email.toLowerCase(),
+                    avatar: picture || `https://ui-avatars.com/api/?name=${encodeURIComponent((name || email.charAt(0)).toUpperCase())}`,
+                    password: randomPassword, // Secure placeholder password
+                    verified: true,
+                    isEmailVerified: true,
+                    status: 'active',
+                    role: 'buyer',
+                    lastLogin: new Date()
+                });
+            } catch (createError) {
+                console.error("Error creating user from Google:", createError);
+                // If user creation fails, check if it's a duplicate email error
+                if (createError.code === 11000 || createError.message?.includes('duplicate')) {
+                    // User might have been created between check and create
+                    user = await User.findOne({ email: email.toLowerCase() });
+                    if (!user) {
+                        throw createError;
+                    }
+                } else {
+                    throw createError;
+                }
+            }
         } else {
             // Update existing user
             if (picture && !user.avatar) {

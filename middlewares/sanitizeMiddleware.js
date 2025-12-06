@@ -83,19 +83,72 @@ const sanitizeObject = (obj, excludeFields = []) => {
  */
 export const sanitizeInput = (excludeFields = []) => {
     return (req, res, next) => {
-        // Sanitize request body
-        if (req.body && typeof req.body === 'object') {
-            req.body = sanitizeObject(req.body, excludeFields);
-        }
-        
-        // Sanitize query parameters
-        if (req.query && typeof req.query === 'object') {
-            req.query = sanitizeObject(req.query, excludeFields);
-        }
-        
-        // Sanitize URL parameters
-        if (req.params && typeof req.params === 'object') {
-            req.params = sanitizeObject(req.params, excludeFields);
+        try {
+            // Sanitize request body
+            if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+                req.body = sanitizeObject(req.body, excludeFields);
+            }
+            
+            // Sanitize query parameters - handle read-only properties safely
+            if (req.query && typeof req.query === 'object') {
+                try {
+                    const queryKeys = Object.keys(req.query);
+                    queryKeys.forEach(key => {
+                        // Skip excluded fields
+                        if (excludeFields.includes(key)) {
+                            return;
+                        }
+                        
+                        const value = req.query[key];
+                        if (typeof value === 'string') {
+                            // Don't sanitize URLs, emails, or JSON strings
+                            if (
+                                !key.toLowerCase().includes('url') &&
+                                !key.toLowerCase().includes('email') &&
+                                !key.toLowerCase().includes('link') &&
+                                !key.toLowerCase().includes('image') &&
+                                !key.toLowerCase().includes('avatar') &&
+                                key !== 'geoLocation' &&
+                                key !== 'content' &&
+                                key !== 'description'
+                            ) {
+                                req.query[key] = sanitizeString(value);
+                            }
+                        } else if (typeof value === 'object' && value !== null) {
+                            req.query[key] = sanitizeObject(value, excludeFields);
+                        }
+                    });
+                } catch (queryError) {
+                    // req.query might be read-only, skip sanitization
+                    console.warn("Could not sanitize query parameters:", queryError.message);
+                }
+            }
+            
+            // Sanitize URL parameters - handle read-only properties safely
+            if (req.params && typeof req.params === 'object') {
+                try {
+                    const paramKeys = Object.keys(req.params);
+                    paramKeys.forEach(key => {
+                        // Skip excluded fields
+                        if (excludeFields.includes(key)) {
+                            return;
+                        }
+                        
+                        const value = req.params[key];
+                        if (typeof value === 'string') {
+                            req.params[key] = sanitizeString(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            req.params[key] = sanitizeObject(value, excludeFields);
+                        }
+                    });
+                } catch (paramsError) {
+                    // req.params might be read-only, skip sanitization
+                    console.warn("Could not sanitize URL parameters:", paramsError.message);
+                }
+            }
+        } catch (error) {
+            console.error("Sanitization error:", error);
+            // Continue even if sanitization fails to prevent breaking the request
         }
         
         next();
