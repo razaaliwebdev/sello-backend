@@ -1,7 +1,40 @@
-// utils/parseArray.js (Unchanged)
+// utils/parseArray.js - Optimized for FormData arrays
 export const parseArray = (val) => {
     if (!val) return [];
-    return Array.isArray(val) ? val : val.split(',').filter(Boolean);
+    
+    // If already an array, filter and return
+    if (Array.isArray(val)) {
+        return val
+            .map(item => typeof item === 'string' ? item.trim() : String(item).trim())
+            .filter(item => item && item.length > 0);
+    }
+    
+    // If string, try to parse as JSON first (for complex arrays)
+    if (typeof val === 'string') {
+        // Try JSON parse first
+        try {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed)) {
+                return parsed
+                    .map(item => typeof item === 'string' ? item.trim() : String(item).trim())
+                    .filter(item => item && item.length > 0);
+            }
+        } catch {
+            // Not JSON, treat as comma-separated
+        }
+        
+        // Split by comma and clean
+        return val
+            .split(',')
+            .map(item => item.trim())
+            .filter(item => item && item.length > 0);
+    }
+    
+    // Fallback: convert to string and split
+    return String(val)
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => item && item.length > 0);
 };
 
 // Builds a MongoDB query object from query parameters (Updated)
@@ -13,11 +46,12 @@ export const buildCarQuery = (query) => {
         throw new Error('Invalid query parameters');
     }
 
-    // Keyword/text search - search across multiple fields
+    // Keyword/text search - search across multiple fields (optimized)
     if (query.search || query.keyword || query.q) {
         const searchTerm = (query.search || query.keyword || query.q).trim();
-        if (searchTerm) {
+        if (searchTerm && searchTerm.length >= 2) { // Minimum 2 characters for search
             // Use $or to search across multiple fields for better results
+            // Use text index if available, otherwise use regex
             filter.$or = [
                 { title: { $regex: searchTerm, $options: 'i' } },
                 { make: { $regex: searchTerm, $options: 'i' } },
@@ -26,6 +60,8 @@ export const buildCarQuery = (query) => {
                 { city: { $regex: searchTerm, $options: 'i' } },
                 { location: { $regex: searchTerm, $options: 'i' } }
             ];
+        } else if (searchTerm.length < 2) {
+            throw new Error('Search term must be at least 2 characters long');
         }
     }
 

@@ -1,5 +1,6 @@
 import express from 'express';
 import { createCar, deleteCar, editCar, getAllCars, getFilteredCars, getMyCars, getSingleCar, markCarAsSold } from '../controllers/carController.js';
+import { boostPost, adminPromotePost, getBoostOptions } from '../controllers/boostController.js';
 import { upload } from '../middlewares/multer.js';
 import { auth } from '../middlewares/authMiddleware.js';
 
@@ -17,6 +18,11 @@ router.put("/:id", auth, upload.array("images"), editCar);  // Edit Car (with im
 router.put("/:carId/sold", auth, markCarAsSold);  // Mark Car as Sold
 router.delete("/:id", auth, deleteCar);          // Delete Car
 router.get('/my/listings', auth, getMyCars);    // GetMyCars (My Listing)
+
+// Boost/Promote Routes
+router.post("/:carId/boost", auth, boostPost);  // User boost post
+router.get("/boost/options", auth, getBoostOptions);  // Get boost options
+router.post("/:carId/admin-promote", auth, adminPromotePost);  // Admin promote post
 
 
 

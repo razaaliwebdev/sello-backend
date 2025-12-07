@@ -6,12 +6,20 @@ import {
     cancelSubscription,
     getPaymentHistory
 } from '../controllers/subscriptionController.js';
+import {
+    createSubscriptionCheckout,
+    createBoostCheckout,
+    stripeWebhook
+} from '../controllers/paymentController.js';
 import { auth } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
 // Public route - get available plans
 router.get("/plans", getSubscriptionPlans);
+
+// Stripe webhook (must be before auth middleware - uses raw body)
+router.post("/webhook", express.raw({ type: 'application/json' }), stripeWebhook);
 
 // Protected routes
 router.use(auth);
@@ -20,6 +28,10 @@ router.get("/my-subscription", getMySubscription);
 router.post("/purchase", purchaseSubscription);
 router.post("/cancel", cancelSubscription);
 router.get("/payment-history", getPaymentHistory);
+
+// Stripe checkout routes
+router.post("/checkout", createSubscriptionCheckout);
+router.post("/boost-checkout", createBoostCheckout);
 
 export default router;
 

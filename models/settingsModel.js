@@ -33,7 +33,7 @@ const settingsSchema = new mongoose.Schema({
     timestamps: true
 });
 
-settingsSchema.index({ key: 1 });
+// Note: key already has an index from unique: true
 settingsSchema.index({ category: 1 });
 
 const Settings = mongoose.model("Settings", settingsSchema);

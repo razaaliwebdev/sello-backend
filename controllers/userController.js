@@ -326,7 +326,8 @@ export const getSavedCars = async (req, res) => {
 
 /**
  * Request Seller Status
- * Allows buyers to upgrade to seller role
+ * Individual users can already sell, so this function is kept for backward compatibility
+ * but now just confirms their current status
  */
 export const requestSeller = async (req, res) => {
     try {
@@ -340,43 +341,58 @@ export const requestSeller = async (req, res) => {
             });
         }
 
-        if (user.role === 'seller') {
-            return res.status(400).json({
-                success: false,
-                message: "You are already a seller."
+        // Individual users can already buy and sell
+        if (user.role === 'individual') {
+            return res.status(200).json({
+                success: true,
+                message: "You can already create posts as an individual user. You can both buy and sell.",
+                data: {
+                    role: user.role,
+                    user: {
+                        _id: user._id,
+                        name: user.name,
+                        email: user.email,
+                        role: user.role
+                    }
+                }
             });
         }
 
         if (user.role === 'dealer') {
-            return res.status(400).json({
-                success: false,
-                message: "You are already a dealer. Dealers can create posts."
+            return res.status(200).json({
+                success: true,
+                message: "You are already a dealer. Dealers can create posts.",
+                data: {
+                    role: user.role,
+                    user: {
+                        _id: user._id,
+                        name: user.name,
+                        email: user.email,
+                        role: user.role
+                    }
+                }
             });
         }
 
         if (user.role === 'admin') {
-            return res.status(400).json({
-                success: false,
-                message: "Admins don't need seller status."
+            return res.status(200).json({
+                success: true,
+                message: "Admins can already create posts.",
+                data: {
+                    role: user.role,
+                    user: {
+                        _id: user._id,
+                        name: user.name,
+                        email: user.email,
+                        role: user.role
+                    }
+                }
             });
         }
 
-        // Upgrade buyer to seller
-        user.role = 'seller';
-        await user.save();
-
-        return res.status(200).json({
-            success: true,
-            message: "Successfully upgraded to seller. You can now create posts.",
-            data: {
-                role: user.role,
-                user: {
-                    _id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    role: user.role
-                }
-            }
+        return res.status(400).json({
+            success: false,
+            message: "Unknown user role."
         });
     } catch (error) {
         console.error("Request Seller Error:", error.message);

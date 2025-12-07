@@ -4,6 +4,8 @@ import ListingHistory from "../models/listingHistoryModel.js";
 import { uploadCloudinary } from '../utils/cloudinary.js'
 import User from '../models/userModel.js';
 import { parseArray, buildCarQuery } from '../utils/parseArray.js';
+import Logger from '../utils/logger.js';
+import { AppError, asyncHandler } from '../middlewares/errorHandler.js';
 
 
 
@@ -18,18 +20,48 @@ export const createCar = async (req, res) => {
             });
         }
 
-        // Check if user can create posts (sellers, dealers, or admins)
-        // Auto-upgrade buyers to sellers when they create their first post
-        const wasBuyer = req.user.role === 'buyer';
-        if (wasBuyer) {
-            // Upgrade buyer to seller automatically
-            req.user.role = 'seller';
-            await req.user.save();
-        } else if (req.user.role !== 'seller' && req.user.role !== 'dealer' && req.user.role !== 'admin') {
+        // Check if user can create posts (individuals, dealers, or admins)
+        // Individual users can both buy and sell, so they can create posts
+        if (req.user.role !== 'individual' && req.user.role !== 'dealer' && req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
-                message: 'Only sellers, dealers, or admins can create posts. Please upgrade to seller first.',
+                message: 'Only individuals, dealers, or admins can create posts.',
             });
+        }
+
+        // Check subscription limits (only for non-admin users)
+        if (req.user.role !== 'admin') {
+            const { SUBSCRIPTION_PLANS } = await import('./subscriptionController.js');
+            const user = await User.findById(req.user._id);
+
+            // Check if subscription is active and not expired
+            const isSubscriptionActive = user.subscription?.isActive &&
+                user.subscription?.endDate &&
+                new Date(user.subscription.endDate) > new Date();
+
+            const planKey = isSubscriptionActive ? (user.subscription?.plan || 'free') : 'free';
+            const plan = SUBSCRIPTION_PLANS[planKey];
+            const maxListings = plan.maxListings;
+
+            // Count active listings (not sold, not deleted)
+            const activeListings = await Car.countDocuments({
+                postedBy: req.user._id,
+                status: { $nin: ['sold', 'deleted'] },
+                $or: [{ isActive: { $exists: false } }, { isActive: true }]
+            });
+
+            // Check if user has reached listing limit (unless unlimited = -1)
+            if (maxListings !== -1 && activeListings >= maxListings) {
+                return res.status(403).json({
+                    success: false,
+                    message: `You have reached your listing limit (${maxListings} listings). Please upgrade your subscription to post more listings.`,
+                    upgradeRequired: true,
+                    currentPlan: planKey,
+                    activeListings,
+                    maxListings,
+                    isSubscriptionActive
+                });
+            }
         }
 
         // Extract fields from FormData
@@ -40,13 +72,21 @@ export const createCar = async (req, res) => {
             geoLocation, horsepower, warranty, numberOfCylinders, ownerType,
         } = req.body;
 
-        // Validate required fields
+        // Validate required fields - optimized validation
         const requiredFields = [
             'title', 'make', 'model', 'year', 'condition', 'price', 'fuelType',
             'engineCapacity', 'transmission', 'regionalSpec', 'bodyType', 'city',
             'contactNumber', 'sellerType', 'warranty', 'ownerType', 'geoLocation',
         ];
-        const missing = requiredFields.filter((key) => !req.body[key] || req.body[key].toString().trim() === '');
+
+        const missing = [];
+        requiredFields.forEach(key => {
+            const value = req.body[key];
+            if (!value || (typeof value === 'string' && value.trim() === '')) {
+                missing.push(key);
+            }
+        });
+
         if (missing.length) {
             return res.status(400).json({
                 success: false,
@@ -129,14 +169,14 @@ export const createCar = async (req, res) => {
             // Validate file types and sizes
             const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
             const maxSize = 20 * 1024 * 1024; // 20MB
-            
+
             const validFiles = req.files.filter(file => {
                 if (!allowedTypes.includes(file.mimetype)) {
-                    console.warn(`Invalid file type: ${file.mimetype}`);
+                    Logger.warn('Invalid file type in car upload', { mimetype: file.mimetype, userId: req.user._id });
                     return false;
                 }
                 if (file.size > maxSize) {
-                    console.warn(`File too large: ${file.size} bytes`);
+                    Logger.warn('File too large in car upload', { size: file.size, userId: req.user._id });
                     return false;
                 }
                 return true;
@@ -155,7 +195,7 @@ export const createCar = async (req, res) => {
                         });
                         return { url: imageUrl, order: index };
                     } catch (err) {
-                        console.error(`Error uploading image ${index}:`, err);
+                        Logger.error(`Error uploading image ${index}`, err, { userId: req.user._id, index });
                         return null;
                     }
                 })
@@ -166,49 +206,59 @@ export const createCar = async (req, res) => {
                 .filter((item) => item !== null)
                 .sort((a, b) => a.order - b.order)
                 .map((item) => item.url);
+
+            // Ensure at least one image was uploaded successfully
+            if (images.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Failed to upload images. Please try again with valid image files.',
+                });
+            }
         }
 
 
-        // Create car document
+        // Create car document - optimized with proper type conversion and trimming
         const carData = {
-            title,
-            description: description || '',
-            make,
-            model,
-            variant: variant || 'N/A',
-            year: parseInt(year),
-            condition,
+            title: String(title).trim(),
+            description: (description || '').trim(),
+            make: String(make).trim(),
+            model: String(model).trim(),
+            variant: (variant || 'N/A').trim(),
+            year: parseInt(year, 10),
+            condition: String(condition).trim(),
             price: parseFloat(price),
-            colorExterior: colorExterior || 'N/A',
-            colorInterior: colorInterior || 'N/A',
-            fuelType,
-            engineCapacity: parseInt(engineCapacity),
-            transmission,
-            mileage: parseInt(mileage) || 0,
-            features: parsedFeatures,
-            regionalSpec,
-            bodyType,
-            city,
-            location: location || '',
-            sellerType,
-            carDoors: parseInt(carDoors) || 4,
-            contactNumber,
+            colorExterior: (colorExterior || 'N/A').trim(),
+            colorInterior: (colorInterior || 'N/A').trim(),
+            fuelType: String(fuelType).trim(),
+            engineCapacity: parseInt(engineCapacity, 10),
+            transmission: String(transmission).trim(),
+            mileage: parseInt(mileage, 10) || 0,
+            features: parsedFeatures, // Already parsed and validated by parseArray
+            regionalSpec: String(regionalSpec).trim(),
+            bodyType: String(bodyType).trim(),
+            city: String(city).trim(),
+            location: (location || '').trim(),
+            sellerType: String(sellerType).trim(),
+            carDoors: parseInt(carDoors, 10) || 4,
+            contactNumber: String(contactNumber).trim(),
             geoLocation: {
                 type: 'Point',
-                coordinates: parsedGeoLocation,
+                coordinates: parsedGeoLocation, // [longitude, latitude]
             },
-            horsepower: parseInt(horsepower) || 0,
-            warranty,
-            numberOfCylinders: parseInt(numberOfCylinders) || 4,
-            ownerType,
-            images,
+            horsepower: parseInt(horsepower, 10) || 0,
+            warranty: String(warranty).trim(),
+            numberOfCylinders: parseInt(numberOfCylinders, 10) || 4,
+            ownerType: String(ownerType).trim(),
+            images, // Array of Cloudinary URLs
             postedBy: req.user._id, // Set from authenticated user
+            isApproved: true, // Auto-approve by default
+            status: 'active', // Set initial status
         };
 
         // console.log('Car data before saving:', carData);
 
         const car = await Car.create(carData);
-        
+
         // Update user's carsPosted array
         await User.findByIdAndUpdate(req.user._id, {
             $push: { carsPosted: car._id }
@@ -219,9 +269,7 @@ export const createCar = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: wasBuyer 
-                ? 'Car post created successfully! You have been automatically upgraded to seller.'
-                : 'Car post created successfully',
+            message: 'Car post created successfully',
             data: {
                 car,
                 user: updatedUser ? {
@@ -232,7 +280,7 @@ export const createCar = async (req, res) => {
             },
         });
     } catch (error) {
-        console.error('Error creating car:', error);
+        Logger.error('Error creating car', error, { userId: req.user?._id });
         return res.status(400).json({
             success: false,
             message: error.message.includes('validation failed')
@@ -286,14 +334,14 @@ export const editCar = async (req, res) => {
             // Validate file types and sizes
             const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
             const maxSize = 20 * 1024 * 1024; // 20MB
-            
+
             const validFiles = req.files.filter(file => {
                 if (!allowedTypes.includes(file.mimetype)) {
-                    console.warn(`Invalid file type: ${file.mimetype}`);
+                    Logger.warn('Invalid file type in car upload', { mimetype: file.mimetype, userId: req.user._id });
                     return false;
                 }
                 if (file.size > maxSize) {
-                    console.warn(`File too large: ${file.size} bytes`);
+                    Logger.warn('File too large in car upload', { size: file.size, userId: req.user._id });
                     return false;
                 }
                 return true;
@@ -311,7 +359,7 @@ export const editCar = async (req, res) => {
                         });
                         return { url: imageUrl, order: index };
                     } catch (err) {
-                        console.error(`Error uploading image ${index}:`, err);
+                        Logger.error(`Error uploading image ${index}`, err, { userId: req.user._id, index });
                         return null;
                     }
                 })
@@ -388,7 +436,7 @@ export const editCar = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Update Car Error:", error.message);
+        Logger.error("Update Car Error", error, { userId: req.user?._id, carId: id });
         return res.status(500).json({
             success: false,
             message: "Server error while updating car",
@@ -468,15 +516,6 @@ export const getMyCars = async (req, res) => {
 // Get All Cars Controller with Pagination (Boosted posts prioritized)
 export const getAllCars = async (req, res) => {
     try {
-        // Check MongoDB connection
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({
-                success: false,
-                message: 'Database connection unavailable. Please try again later.',
-                error: 'MongoDB not connected'
-            });
-        }
-
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 12;
         const skip = (page - 1) * limit;
@@ -489,7 +528,7 @@ export const getAllCars = async (req, res) => {
             );
         } catch (dbError) {
             // If updateMany fails, log but continue (non-critical operation)
-            console.warn("Failed to clean up expired boosts:", dbError.message);
+            Logger.warn("Failed to clean up expired boosts", { error: dbError.message });
         }
 
         const now = new Date();
@@ -583,7 +622,7 @@ export const getAllCars = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get Cars Error:", error.message);
+        Logger.error("Get Cars Error", error);
         return res.status(500).json({
             success: false,
             message: 'Server error while fetching cars',
@@ -636,7 +675,7 @@ export const getSingleCar = async (req, res) => {
                 );
             } catch (viewError) {
                 // Don't fail the request if tracking fails
-                console.error('Failed to track recently viewed:', viewError);
+                Logger.error('Failed to track recently viewed', viewError, { carId: id });
             }
         }
 
@@ -650,7 +689,7 @@ export const getSingleCar = async (req, res) => {
             });
         } catch (analyticsError) {
             // Don't fail the request if analytics fails
-            console.error('Failed to track analytics:', analyticsError);
+            Logger.error('Failed to track analytics', analyticsError, { carId: id });
         }
 
         return res.status(200).json({
@@ -659,7 +698,7 @@ export const getSingleCar = async (req, res) => {
             data: car
         });
     } catch (error) {
-        console.error("Get Car Error:", error.message);
+        Logger.error("Get Car Error", error, { carId: id });
         return res.status(500).json({
             success: false,
             message: "Server error while fetching car",
@@ -748,7 +787,7 @@ export const markCarAsSold = async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("Mark Car as Sold Error:", error.message);
+        Logger.error("Mark Car as Sold Error", error, { userId: req.user?._id, carId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -760,15 +799,6 @@ export const markCarAsSold = async (req, res) => {
 
 export const getFilteredCars = async (req, res) => {
     try {
-        // Check MongoDB connection
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({
-                success: false,
-                message: 'Database connection unavailable. Please try again later.',
-                error: 'MongoDB not connected'
-            });
-        }
-
         // Clean up expired boosts
         try {
             await Car.updateMany(
@@ -777,7 +807,7 @@ export const getFilteredCars = async (req, res) => {
             );
         } catch (dbError) {
             // If updateMany fails, log but continue (non-critical operation)
-            console.warn("Failed to clean up expired boosts:", dbError.message);
+            Logger.warn("Failed to clean up expired boosts", { error: dbError.message });
         }
 
         // Validate and parse pagination parameters
@@ -786,7 +816,18 @@ export const getFilteredCars = async (req, res) => {
         const skip = (page - 1) * limit;
 
         // Build filter query - show approved cars (or cars without isApproved field)
-        const { filter, locationFilter } = buildCarQuery(req.query);
+        let filter, locationFilter;
+        try {
+            const queryResult = buildCarQuery(req.query);
+            filter = queryResult.filter;
+            locationFilter = queryResult.locationFilter;
+        } catch (queryError) {
+            Logger.warn('Invalid filter query parameters', { error: queryError.message, query: req.query });
+            return res.status(400).json({
+                success: false,
+                message: `Invalid filter parameters: ${queryError.message}`,
+            });
+        }
 
         // Add approval check - show approved or cars without isApproved field
         const approvalFilter = {
@@ -859,11 +900,15 @@ export const getFilteredCars = async (req, res) => {
             };
         }
 
-        // Execute queries in parallel
+        // Execute queries in parallel - optimized
         let cars, total;
         try {
+            // Build query with select to only get needed fields (performance optimization)
+            const selectFields = 'title make model year condition price images city location mileage fuelType transmission bodyType regionalSpec postedBy createdAt views isBoosted featured';
+
             [cars, total] = await Promise.all([
                 Car.find(finalFilter)
+                    .select(selectFields)
                     .sort(sort)
                     .skip(skip)
                     .limit(limit)
@@ -872,8 +917,12 @@ export const getFilteredCars = async (req, res) => {
                 Car.countDocuments(finalFilter)
             ]);
         } catch (dbError) {
-            console.error('Database query error:', dbError);
-            throw new Error(`Database query failed: ${dbError.message}`);
+            Logger.error('Database query error in getFilteredCars', dbError);
+            return res.status(500).json({
+                success: false,
+                message: 'Database query failed. Please try again later.',
+                error: process.env.NODE_ENV === 'development' ? dbError.message : undefined
+            });
         }
 
         // Calculate pagination metadata
@@ -898,7 +947,7 @@ export const getFilteredCars = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Get Filtered Cars Error:", error);
+        Logger.error("Get Filtered Cars Error", error);
         return res.status(500).json({
             success: false,
             message: "Error fetching cars. Please try again later.",

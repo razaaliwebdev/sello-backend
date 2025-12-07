@@ -78,7 +78,7 @@ const blogSchema = new mongoose.Schema({
 blogSchema.index({ status: 1, publishedAt: -1 });
 blogSchema.index({ category: 1 });
 blogSchema.index({ author: 1 });
-blogSchema.index({ slug: 1 });
+// Note: slug already has an index from unique: true
 blogSchema.index({ isFeatured: 1, publishedAt: -1 });
 
 const Blog = mongoose.model("Blog", blogSchema);

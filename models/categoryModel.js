@@ -54,7 +54,7 @@ const categorySchema = new mongoose.Schema({
 
 categorySchema.index({ type: 1, isActive: 1 });
 categorySchema.index({ type: 1, subType: 1, isActive: 1 });
-categorySchema.index({ slug: 1 });
+// Note: slug already has an index from unique: true
 categorySchema.index({ parentCategory: 1 });
 
 const Category = mongoose.model("Category", categorySchema);

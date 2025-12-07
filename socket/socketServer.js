@@ -10,9 +10,24 @@ const typingUsers = new Map(); // chatId -> Set of userIds typing
 const liveLocationTrackers = new Map(); // userId -> { carId, location, isActive }
 
 export const initializeSocket = (server) => {
+    // CORS configuration for Socket.io
+    const allowedOrigins = process.env.CLIENT_URL 
+        ? process.env.CLIENT_URL.split(',').map(url => url.trim())
+        : ["http://localhost:5173", "http://127.0.0.1:5173"];
+    
+    if (process.env.PRODUCTION_URL) {
+        allowedOrigins.push(process.env.PRODUCTION_URL);
+    }
+
     const io = new Server(server, {
         cors: {
-            origin: process.env.CLIENT_URL || ["http://localhost:5173", "http://127.0.0.1:5173"],
+            origin: (origin, callback) => {
+                if (!origin || allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+                    callback(null, true);
+                } else {
+                    callback(new Error('Not allowed by CORS'));
+                }
+            },
             methods: ["GET", "POST"],
             credentials: true,
             allowedHeaders: ["Authorization", "Content-Type"]
@@ -230,8 +245,8 @@ export const initializeSocket = (server) => {
                     chatId: chatId
                 });
 
-                // Send notification to seller if buyer sent message in car chat
-                if (chat.chatType === 'car' && socket.user.role === 'buyer') {
+                // Send notification to seller if individual sent message in car chat
+                if (chat.chatType === 'car' && socket.user.role === 'individual') {
                     try {
                         const Car = (await import('../models/carModel.js')).default;
                         const Notification = (await import('../models/notificationModel.js')).default;
@@ -242,7 +257,7 @@ export const initializeSocket = (server) => {
                         if (seller && seller._id.toString() !== socket.userId.toString()) {
                             // Create notification
                             await Notification.create({
-                                title: "New Message from Buyer",
+                                title: "New Message",
                                 message: `${socket.user.name} sent you a message about "${car?.title || 'your listing'}"`,
                                 type: "info",
                                 recipient: seller._id,
@@ -252,7 +267,7 @@ export const initializeSocket = (server) => {
 
                             // Emit notification via socket
                             io.to(`user:${seller._id}`).emit('new-notification', {
-                                title: "New Message from Buyer",
+                                title: "New Message",
                                 message: `${socket.user.name} sent you a message`,
                                 chatId: chatId,
                                 carId: car?._id

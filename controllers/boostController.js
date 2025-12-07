@@ -1,47 +1,21 @@
 import Car from '../models/carModel.js';
 import User from '../models/userModel.js';
-import mongoose from 'mongoose';
+import Logger from '../utils/logger.js';
+import { SUBSCRIPTION_PLANS } from './subscriptionController.js';
 
 /**
- * Boost Post Configuration
- */
-const BOOST_CONFIG = {
-    PRICE_PER_DAY: 5, // $5 per day
-    MIN_DURATION: 1, // minimum 1 day
-    MAX_DURATION: 30, // maximum 30 days
-    ADMIN_BOOST_PRIORITY: 100, // Admin boosted posts get highest priority
-    USER_BOOST_PRIORITY: 50 // User boosted posts get medium priority
-};
-
-/**
- * Calculate Boost Cost
- */
-const calculateBoostCost = (days) => {
-    return days * BOOST_CONFIG.PRICE_PER_DAY;
-};
-
-/**
- * Boost a Car Post (User Payment)
+ * Boost/Promote Post - User can boost their own post
+ * Uses boost credits or charges via payment
  */
 export const boostPost = async (req, res) => {
     try {
         const { carId } = req.params;
-        const { duration, paymentMethod, transactionId } = req.body;
+        const { duration = 7, useCredits = true } = req.body; // duration in days
 
-        // Validate car ID
-        if (!mongoose.Types.ObjectId.isValid(carId)) {
+        if (!carId) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid car ID."
-            });
-        }
-
-        // Validate duration
-        const days = parseInt(duration);
-        if (!days || days < BOOST_CONFIG.MIN_DURATION || days > BOOST_CONFIG.MAX_DURATION) {
-            return res.status(400).json({
-                success: false,
-                message: `Duration must be between ${BOOST_CONFIG.MIN_DURATION} and ${BOOST_CONFIG.MAX_DURATION} days.`
+                message: 'Car ID is required'
             });
         }
 
@@ -50,7 +24,7 @@ export const boostPost = async (req, res) => {
         if (!car) {
             return res.status(404).json({
                 success: false,
-                message: "Car not found."
+                message: 'Car not found'
             });
         }
 
@@ -58,266 +32,210 @@ export const boostPost = async (req, res) => {
         if (car.postedBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
-                message: "You can only boost your own posts."
+                message: 'You can only boost your own posts'
             });
         }
 
-        // Check if car is approved
-        if (!car.isApproved) {
+        // Check if car is already boosted and not expired
+        if (car.isBoosted && car.boostExpiry && new Date(car.boostExpiry) > new Date()) {
             return res.status(400).json({
                 success: false,
-                message: "Cannot boost unapproved posts. Please wait for admin approval."
+                message: 'This post is already boosted. Wait for it to expire or extend the boost.'
             });
         }
 
-        // Calculate cost
-        const cost = calculateBoostCost(days);
+        const user = await User.findById(req.user._id);
+        const boostCost = 5; // Cost per day in boost credits or USD
 
-        // Check if user has enough credits (if using credits)
-        if (req.body.useCredits && req.user.boostCredits < cost) {
-            return res.status(400).json({
-                success: false,
-                message: `Insufficient credits. You need ${cost} credits, but you have ${req.user.boostCredits}.`
+        // If using credits
+        if (useCredits && user.boostCredits >= (boostCost * duration)) {
+            // Deduct credits
+            user.boostCredits -= (boostCost * duration);
+            await user.save();
+
+            // Boost the car
+            const expiryDate = new Date();
+            expiryDate.setDate(expiryDate.getDate() + duration);
+
+            car.isBoosted = true;
+            car.boostExpiry = expiryDate;
+            car.boostPriority = 50; // User boost priority
+            car.boostHistory.push({
+                boostedAt: new Date(),
+                boostedBy: req.user._id,
+                boostType: 'user',
+                duration: duration,
+                expiredAt: expiryDate
             });
-        }
 
-        // If using credits, deduct them
-        if (req.body.useCredits) {
-            req.user.boostCredits -= cost;
-            await req.user.save({ validateBeforeSave: false });
+            await car.save();
+
+            Logger.info(`User ${req.user._id} boosted car ${carId} using credits`);
+
+            return res.status(200).json({
+                success: true,
+                message: `Post boosted for ${duration} days`,
+                data: {
+                    car,
+                    remainingCredits: user.boostCredits
+                }
+            });
         } else {
-            // Process Payment via Payment Service
-            try {
-                // Import payment service
-                const { verifyPayment } = await import('../services/paymentService.js');
-                
-                // If we already have a transactionId from frontend, verify it
-                if (!transactionId) {
-                    return res.status(400).json({
-                        success: false,
-                        message: "Payment transaction ID is required."
-                    });
-                }
-
-                // Verify the transaction with the payment gateway
-                const payment = await verifyPayment(transactionId);
-                if (!payment.verified || payment.status !== 'succeeded') {
-                    throw new Error("Payment not successful or not verified");
-                }
-
-                req.user.paymentHistory.push({
-                    amount: cost,
-                    currency: "USD",
-                    paymentMethod: paymentMethod || "card",
-                    transactionId: transactionId,
-                    purpose: "boost",
-                    status: "completed"
-                });
-                req.user.totalSpent += cost;
-                await req.user.save({ validateBeforeSave: false });
-
-            } catch (paymentError) {
-                console.error("Payment processing error:", paymentError);
-                return res.status(400).json({
-                    success: false,
-                    message: "Payment failed: " + paymentError.message
-                });
-            }
-        }
-
-        // Calculate expiry date
-        const expiryDate = new Date();
-        expiryDate.setDate(expiryDate.getDate() + days);
-
-        // Update car boost status
-        car.isBoosted = true;
-        car.boostExpiry = expiryDate;
-        car.boostPriority = req.user.role === 'admin' ? BOOST_CONFIG.ADMIN_BOOST_PRIORITY : BOOST_CONFIG.USER_BOOST_PRIORITY;
-        car.boostHistory.push({
-            boostedAt: new Date(),
-            boostedBy: req.user._id,
-            boostType: req.user.role === 'admin' ? 'admin' : 'user',
-            duration: days,
-            expiredAt: expiryDate
-        });
-
-        await car.save();
-
-        // Track analytics
-        try {
-            const { trackEvent, AnalyticsEvents } = await import('../utils/analytics.js');
-            await trackEvent(AnalyticsEvents.BOOST_PURCHASE, req.user._id, {
-                carId: car._id.toString(),
-                duration: days,
-                cost: cost,
-                paymentMethod: req.body.useCredits ? 'credits' : 'payment'
+            // Need payment
+            return res.status(402).json({
+                success: false,
+                message: 'Insufficient boost credits. Payment required.',
+                requiresPayment: true,
+                cost: boostCost * duration,
+                duration: duration,
+                carId: carId
             });
-        } catch (analyticsError) {
-            // Don't fail the request if analytics fails
-            console.error('Failed to track analytics:', analyticsError);
         }
-
-        return res.status(200).json({
-            success: true,
-            message: `Post boosted successfully for ${days} day(s).`,
-            data: {
-                car: {
-                    _id: car._id,
-                    title: car.title,
-                    isBoosted: car.isBoosted,
-                    boostExpiry: car.boostExpiry,
-                    boostPriority: car.boostPriority
-                },
-                cost,
-                expiryDate,
-                remainingCredits: req.user.boostCredits
-            }
-        });
     } catch (error) {
-        console.error("Boost Post Error:", error.message);
+        Logger.error('Boost Post Error:', error);
         return res.status(500).json({
             success: false,
-            message: "Server error. Please try again later.",
+            message: 'Server error boosting post',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
 /**
- * Admin Boost Post (Free)
+ * Admin Promote Post - Admin can promote any post and charge user
  */
-export const adminBoostPost = async (req, res) => {
+export const adminPromotePost = async (req, res) => {
     try {
-        const { carId } = req.params;
-        const { duration } = req.body;
-
-        // Check admin access
         if (req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
-                message: "Only admins can boost posts for free."
+                message: 'Only admins can promote posts'
             });
         }
 
-        // Validate car ID
-        if (!mongoose.Types.ObjectId.isValid(carId)) {
+        const { carId } = req.params;
+        const { duration = 7, chargeUser = true, priority = 100 } = req.body;
+
+        if (!carId) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid car ID."
+                message: 'Car ID is required'
             });
         }
 
-        // Validate duration
-        const days = parseInt(duration) || 7; // Default 7 days for admin
-
-        // Find car
-        const car = await Car.findById(carId);
+        const car = await Car.findById(carId).populate('postedBy');
         if (!car) {
             return res.status(404).json({
                 success: false,
-                message: "Car not found."
+                message: 'Car not found'
             });
         }
 
-        // Calculate expiry date
         const expiryDate = new Date();
-        expiryDate.setDate(expiryDate.getDate() + days);
+        expiryDate.setDate(expiryDate.getDate() + duration);
 
-        // Update car boost status
+        // Update car
         car.isBoosted = true;
         car.boostExpiry = expiryDate;
-        car.boostPriority = BOOST_CONFIG.ADMIN_BOOST_PRIORITY;
+        car.boostPriority = priority; // Admin can set higher priority
         car.boostHistory.push({
             boostedAt: new Date(),
             boostedBy: req.user._id,
             boostType: 'admin',
-            duration: days,
+            duration: duration,
             expiredAt: expiryDate
         });
 
         await car.save();
 
+        // Charge user if requested
+        if (chargeUser && car.postedBy) {
+            const boostCost = 5 * duration; // Cost per day
+            const owner = await User.findById(car.postedBy._id);
+            
+            if (owner.boostCredits >= boostCost) {
+                owner.boostCredits -= boostCost;
+            } else {
+                // Add to payment history for manual payment
+                owner.paymentHistory.push({
+                    amount: boostCost,
+                    currency: 'USD',
+                    paymentMethod: 'admin_charge',
+                    transactionId: `ADMIN-BOOST-${Date.now()}`,
+                    purpose: 'boost',
+                    status: 'pending',
+                    createdAt: new Date()
+                });
+            }
+            await owner.save();
+        }
+
+        Logger.info(`Admin ${req.user._id} promoted car ${carId}`);
+
         return res.status(200).json({
             success: true,
-            message: `Post boosted by admin for ${days} day(s).`,
-            data: {
-                car: {
-                    _id: car._id,
-                    title: car.title,
-                    isBoosted: car.isBoosted,
-                    boostExpiry: car.boostExpiry,
-                    boostPriority: car.boostPriority
-                },
-                boostedBy: req.user.name,
-                expiryDate
-            }
+            message: `Post promoted for ${duration} days`,
+            data: { car }
         });
     } catch (error) {
-        console.error("Admin Boost Post Error:", error.message);
+        Logger.error('Admin Promote Post Error:', error);
         return res.status(500).json({
             success: false,
-            message: "Server error. Please try again later.",
+            message: 'Server error promoting post',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
 /**
- * Remove Boost from Post
+ * Get Boost Options - Returns boost pricing and user credits
  */
-export const removeBoost = async (req, res) => {
+export const getBoostOptions = async (req, res) => {
     try {
-        const { carId } = req.params;
-
-        // Validate car ID
-        if (!mongoose.Types.ObjectId.isValid(carId)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid car ID."
-            });
-        }
-
-        // Find car
-        const car = await Car.findById(carId);
-        if (!car) {
-            return res.status(404).json({
-                success: false,
-                message: "Car not found."
-            });
-        }
-
-        // Check permissions (owner or admin)
-        if (car.postedBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: "You don't have permission to remove boost from this post."
-            });
-        }
-
-        // Remove boost
-        car.isBoosted = false;
-        car.boostExpiry = null;
-        car.boostPriority = 0;
-
-        await car.save();
+        const user = await User.findById(req.user._id).select('boostCredits subscription');
+        const plan = SUBSCRIPTION_PLANS[user.subscription?.plan || 'free'];
 
         return res.status(200).json({
             success: true,
-            message: "Boost removed successfully.",
             data: {
-                car: {
-                    _id: car._id,
-                    title: car.title,
-                    isBoosted: car.isBoosted
+                boostCredits: user.boostCredits,
+                costPerDay: 5,
+                availableDurations: [3, 7, 14, 30],
+                planBoostCredits: plan.boostCredits || 0
+            }
+        });
+    } catch (error) {
+        Logger.error('Get Boost Options Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Server error fetching boost options'
+        });
+    }
+};
+
+/**
+ * Get Boost Pricing (Public)
+ */
+export const getBoostPricing = async (req, res) => {
+    try {
+        return res.status(200).json({
+            success: true,
+            data: {
+                costPerDay: 5,
+                availableDurations: [3, 7, 14, 30],
+                pricing: {
+                    3: 15,
+                    7: 35,
+                    14: 70,
+                    30: 150
                 }
             }
         });
     } catch (error) {
-        console.error("Remove Boost Error:", error.message);
+        Logger.error('Get Boost Pricing Error:', error);
         return res.status(500).json({
             success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: 'Server error fetching boost pricing'
         });
     }
 };
@@ -328,126 +246,106 @@ export const removeBoost = async (req, res) => {
 export const getBoostStatus = async (req, res) => {
     try {
         const { carId } = req.params;
+        const car = await Car.findById(carId).select('isBoosted boostExpiry boostPriority boostHistory');
 
-        // Validate car ID
-        if (!mongoose.Types.ObjectId.isValid(carId)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid car ID."
-            });
-        }
-
-        // Find car
-        const car = await Car.findById(carId).select("isBoosted boostExpiry boostPriority boostHistory");
         if (!car) {
             return res.status(404).json({
                 success: false,
-                message: "Car not found."
+                message: 'Car not found'
             });
-        }
-
-        // Check if boost is expired
-        const isExpired = car.boostExpiry && new Date() > car.boostExpiry;
-        if (isExpired && car.isBoosted) {
-            car.isBoosted = false;
-            car.boostPriority = 0;
-            await car.save({ validateBeforeSave: false });
         }
 
         return res.status(200).json({
             success: true,
             data: {
-                isBoosted: car.isBoosted && !isExpired,
+                isBoosted: car.isBoosted,
                 boostExpiry: car.boostExpiry,
                 boostPriority: car.boostPriority,
-                boostHistory: car.boostHistory,
-                isExpired
+                boostHistory: car.boostHistory
             }
         });
     } catch (error) {
-        console.error("Get Boost Status Error:", error.message);
+        Logger.error('Get Boost Status Error:', error);
         return res.status(500).json({
             success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: 'Server error fetching boost status'
         });
     }
 };
 
 /**
- * Purchase Boost Credits
+ * Remove Boost
+ */
+export const removeBoost = async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only admins can remove boosts'
+            });
+        }
+
+        const { carId } = req.params;
+        const car = await Car.findById(carId);
+
+        if (!car) {
+            return res.status(404).json({
+                success: false,
+                message: 'Car not found'
+            });
+        }
+
+        car.isBoosted = false;
+        car.boostExpiry = null;
+        car.boostPriority = 0;
+        await car.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Boost removed successfully',
+            data: { car }
+        });
+    } catch (error) {
+        Logger.error('Remove Boost Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Server error removing boost'
+        });
+    }
+};
+
+/**
+ * Admin Boost Post (alias for adminPromotePost)
+ */
+export const adminBoostPost = adminPromotePost;
+
+/**
+ * Purchase Credits
  */
 export const purchaseCredits = async (req, res) => {
     try {
-        const { amount, paymentMethod, transactionId } = req.body;
+        const { amount } = req.body; // amount in USD
 
-        if (!amount || amount <= 0) {
+        if (!amount || amount < 5) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid amount. Amount must be greater than 0."
+                message: 'Minimum purchase is $5'
             });
         }
 
-        // In a real app, you would process payment here
-        // For now, we'll just add credits
-        req.user.boostCredits += amount;
-        req.user.paymentHistory.push({
-            amount: amount * BOOST_CONFIG.PRICE_PER_DAY, // Assuming 1 credit = $1
-            currency: "USD",
-            paymentMethod: paymentMethod || "card",
-            transactionId: transactionId || `TXN-${Date.now()}`,
-            purpose: "credits",
-            status: "completed"
-        });
-        req.user.totalSpent += amount * BOOST_CONFIG.PRICE_PER_DAY;
-
-        await req.user.save({ validateBeforeSave: false });
-
-        return res.status(200).json({
-            success: true,
-            message: `Successfully purchased ${amount} boost credits.`,
-            data: {
-                creditsAdded: amount,
-                totalCredits: req.user.boostCredits
-            }
+        // This would typically create a Stripe checkout session
+        // For now, return payment required
+        return res.status(402).json({
+            success: false,
+            message: 'Payment required to purchase credits',
+            requiresPayment: true,
+            amount: amount
         });
     } catch (error) {
-        console.error("Purchase Credits Error:", error.message);
+        Logger.error('Purchase Credits Error:', error);
         return res.status(500).json({
             success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: 'Server error purchasing credits'
         });
     }
 };
-
-/**
- * Get Boost Pricing Info
- */
-export const getBoostPricing = async (req, res) => {
-    try {
-        return res.status(200).json({
-            success: true,
-            data: {
-                pricePerDay: BOOST_CONFIG.PRICE_PER_DAY,
-                minDuration: BOOST_CONFIG.MIN_DURATION,
-                maxDuration: BOOST_CONFIG.MAX_DURATION,
-                pricing: {
-                    1: calculateBoostCost(1),
-                    3: calculateBoostCost(3),
-                    7: calculateBoostCost(7),
-                    14: calculateBoostCost(14),
-                    30: calculateBoostCost(30)
-                }
-            }
-        });
-    } catch (error) {
-        console.error("Get Boost Pricing Error:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
-

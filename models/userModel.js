@@ -66,8 +66,8 @@ const userSchema = new mongoose.Schema(
         },
         role: {
             type: String,
-            enum: ["buyer", "seller", "admin", "dealer"],
-            default: "buyer"
+            enum: ["individual", "dealer", "admin"],
+            default: "individual"
         },
         adminRole: {
             type: String,
@@ -178,7 +178,7 @@ const userSchema = new mongoose.Schema(
 );
 
 // Indexes for faster queries
-userSchema.index({ email: 1 });
+// Note: email already has an index from unique: true
 userSchema.index({ status: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ "subscription.isActive": 1, "subscription.plan": 1 });

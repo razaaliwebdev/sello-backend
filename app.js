@@ -2,6 +2,8 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
 import authRouter from './routes/authRoutes.js';
 import userRouter from './routes/userRoutes.js';
 import carRouter from './routes/carRoutes.js';
@@ -29,18 +31,73 @@ import recommendationsRouter from './routes/recommendationsRoutes.js';
 import subscriptionRouter from './routes/subscriptionRoutes.js';
 import { performanceMonitor } from './middlewares/performanceMiddleware.js';
 import Logger from './utils/logger.js';
+import mongoose from 'mongoose';
+import {
+  notFoundHandler,
+  errorHandler,
+  validationErrorHandler,
+  duplicateKeyErrorHandler,
+  castErrorHandler
+} from './middlewares/errorHandler.js';
 
 dotenv.config();
 
 export const app = express();
 
 // MIDDLEWARES
+// Security headers (Helmet) - configure for Google OAuth compatibility
+app.use(helmet({
+  crossOriginOpenerPolicy: { policy: "unsafe-none" }, // Required for Google OAuth
+  crossOriginEmbedderPolicy: { policy: "unsafe-none" }, // Required for Google OAuth
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:", "http:"], // Allow images from any source (for Cloudinary, etc.)
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
+      connectSrc: ["'self'", "https://accounts.google.com", "https://www.googleapis.com"],
+    },
+  },
+}));
+
+// Compression middleware (gzip)
+app.use(compression());
+
+// CORS configuration - supports multiple origins from environment variable
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map(url => url.trim())
+  : ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://localhost:5174"];
+
+// Add production URL if provided
+if (process.env.PRODUCTION_URL) {
+  allowedOrigins.push(process.env.PRODUCTION_URL);
+}
+
 app.use(cors({
-  origin: ["http://localhost:5173", "http://127.0.0.1:5173", "https://sello.ae"],
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization", "email"],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    // In development, allow all localhost origins
+    if (process.env.NODE_ENV === 'development') {
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
+    }
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      Logger.warn(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "email", "X-Requested-With"],
   credentials: true,
-  exposedHeaders: ["Set-Cookie"]
+  exposedHeaders: ["Set-Cookie"],
+  optionsSuccessStatus: 200 // Some legacy browsers (IE11, various SmartTVs) choke on 204
 }));
 
 // Add security headers for Google OAuth
@@ -52,6 +109,8 @@ app.use((req, res, next) => {
   next();
 });
 
+// Stripe webhook needs raw body, so we need to handle it before json parser
+// But we'll handle it in the route itself with express.raw()
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -67,7 +126,7 @@ app.use(sanitizeInput(['password', 'token', 'otp', 'content', 'description', 'me
 
 // Rate limiting (use Redis in production for distributed systems)
 if (process.env.NODE_ENV === 'production') {
-    app.use(rateLimit);
+  app.use(rateLimit);
 }
 
 // ROUTES
@@ -102,15 +161,17 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "SELLO API is running",
-    version: "1.0.0"
+    version: "1.0.0",
+    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected"
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "Route not found"
-  });
-});
+// 404 handler - must be after all routes
+app.use(notFoundHandler);
+
+// Error handling middleware - must be last
+app.use(validationErrorHandler);
+app.use(duplicateKeyErrorHandler);
+app.use(castErrorHandler);
+app.use(errorHandler);
 

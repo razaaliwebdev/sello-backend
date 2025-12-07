@@ -4,13 +4,14 @@ import connectDB from './config/db.js';
 import { initializeSocket } from './socket/socketServer.js';
 import { initializeRoles } from './controllers/roleController.js';
 import Logger from './utils/logger.js';
+import mongoose from 'mongoose';
 
 // Optional: Setup cron jobs for background tasks
 let cronJobs = null;
 if (process.env.ENABLE_CRON_JOBS === 'true') {
     try {
         const cron = await import('node-cron');
-        
+
         // Run boost expiration every 30 minutes
         cron.default.schedule('*/30 * * * *', async () => {
             Logger.info('Running boost expiration job...');
@@ -39,38 +40,60 @@ if (process.env.ENABLE_CRON_JOBS === 'true') {
     }
 }
 
+// Start server regardless of DB connection status
+const startServer = () => {
+    try {
+        const PORT = process.env.PORT || 3000;
+        const server = http.createServer(app);
+
+        // Initialize Socket.io with error handling
+        let io;
+        try {
+            io = initializeSocket(server);
+            app.set('io', io);
+        } catch (socketError) {
+            console.error('Socket.io initialization error:', socketError);
+            // Continue without socket.io if it fails
+        }
+
+        server.listen(PORT, () => {
+            Logger.info(`Server is running on PORT:${PORT}`);
+            Logger.info(`API available at http://localhost:${PORT}/api`);
+            console.log(`🚀 Server is running on PORT:${PORT}`);
+            console.log(`📡 API available at http://localhost:${PORT}/api`);
+            if (io) {
+                console.log(`🔌 Socket.io initialized`);
+            }
+        });
+
+        // Handle server errors
+        server.on('error', (error) => {
+            if (error.code === 'EADDRINUSE') {
+                console.error(`❌ Port ${PORT} is already in use. Please use a different port.`);
+                process.exit(1);
+            } else {
+                console.error('❌ Server error:', error);
+            }
+        });
+    } catch (error) {
+        console.error('❌ Failed to start server:', error);
+        process.exit(1);
+    }
+};
+
+// Try to connect to DB, but start server anyway
 connectDB().then(() => {
-    // Initialize default roles
-    initializeRoles();
-    const PORT = process.env.PORT || 4000;
-    
-    // Create HTTP server
-    const server = http.createServer(app);
-    
-    // Initialize Socket.io
-    const io = initializeSocket(server);
-    
-    // Make io available globally (optional, for use in other files)
-    app.set('io', io);
-    
-    server.listen(PORT, () => {
-        Logger.info(`Server is running on PORT:${PORT}`);
-        Logger.info(`Socket.io initialized`);
-        Logger.info(`API available at http://localhost:${PORT}/api`);
-        console.log(`🚀 Server is running on the PORT:${PORT}`);
-        console.log(`🔌 Socket.io initialized`);
-        console.log(`📡 API available at http://localhost:${PORT}/api`);
-    });
+    // Initialize default roles only if DB is connected
+    if (mongoose.connection.readyState === 1) {
+        try {
+            initializeRoles();
+        } catch (roleError) {
+            console.error('Role initialization error:', roleError);
+        }
+    }
+    startServer();
 }).catch((error) => {
-    console.error("❌ Failed to start server:", error);
-    // Still try to start the server even if DB connection fails
-    const PORT = process.env.PORT || 4000;
-    const server = http.createServer(app);
-    const io = initializeSocket(server);
-    app.set('io', io);
-    
-    server.listen(PORT, () => {
-        console.log(`⚠️  Server started on PORT:${PORT} but MongoDB is not connected`);
-        console.log(`📡 API available at http://localhost:${PORT}/api`);
-    });
+    console.error('DB connection error (server will start anyway):', error.message);
+    // Start server even if DB connection fails
+    startServer();
 });

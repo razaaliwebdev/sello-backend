@@ -14,6 +14,12 @@ import {
     verifyDealer,
     getListingHistory
 } from '../controllers/adminController.js';
+import {
+    getAllPayments,
+    getAllSubscriptions,
+    adminUpdateSubscription,
+    adminCancelSubscription
+} from '../controllers/adminPaymentController.js';
 import { auth, authorize } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
@@ -45,6 +51,12 @@ router.put("/dealers/:userId/verify", verifyDealer);
 
 // Customer Management (same as users but filtered)
 router.get("/customers", getAllUsers); // Can filter by role=buyer in query
+
+// Payment Management
+router.get("/payments", getAllPayments);
+router.get("/subscriptions", getAllSubscriptions);
+router.put("/subscriptions/:userId", adminUpdateSubscription);
+router.delete("/subscriptions/:userId", adminCancelSubscription);
 
 export default router;
 

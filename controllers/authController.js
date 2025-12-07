@@ -40,10 +40,10 @@ const isValidPassword = (password) => {
  */
 export const register = async (req, res) => {
     try {
-        const { 
-            name, 
-            email, 
-            password, 
+        const {
+            name,
+            email,
+            password,
             role,
             // Dealer-specific fields
             dealerName,
@@ -120,7 +120,7 @@ export const register = async (req, res) => {
             email: email.toLowerCase().trim(),
             avatar: avatarUrl,
             password: hashedPassword,
-            role: role === "dealer" ? "dealer" : (role === "seller" ? "seller" : "buyer"),
+            role: role === "dealer" ? "dealer" : (role === "admin" ? "admin" : "individual"),
             status: "active",
             isEmailVerified: false
         };
@@ -169,7 +169,7 @@ export const register = async (req, res) => {
         });
     } catch (error) {
         console.error("Register Error:", error.message);
-        
+
         // Handle duplicate email error
         if (error.code === 11000) {
             return res.status(409).json({
@@ -371,7 +371,7 @@ export const forgotPassword = async (req, res) => {
 
         try {
             const emailResult = await sendEmail(user.email, subject, html);
-            
+
             // If email wasn't actually sent (dev mode), log it but still return success
             const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
             if (emailResult?.messageId === 'dev-mode') {
@@ -382,11 +382,11 @@ export const forgotPassword = async (req, res) => {
             console.error("❌ Email sending error:", emailError.message);
             console.error("Full error details:", emailError);
             console.error("Stack trace:", emailError.stack);
-            
+
             // Check if SMTP is not configured
             const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
             const isMissingSMTP = emailError.message.includes("Email configuration is missing");
-            
+
             // If SMTP is missing and we're in development, log OTP and still return success
             if (isMissingSMTP && isDevelopment) {
                 console.log(`\n⚠️  SMTP not configured. OTP for ${user.email}: ${otp}\n`);
@@ -401,7 +401,7 @@ export const forgotPassword = async (req, res) => {
                 user.otp = null;
                 user.otpExpiry = null;
                 await user.save({ validateBeforeSave: false });
-                
+
                 let errorMessage = "Failed to send OTP. Please try again later.";
                 if (emailError.message.includes("SMTP")) {
                     errorMessage = "Email service connection failed. Please try again later.";
@@ -410,7 +410,7 @@ export const forgotPassword = async (req, res) => {
                 } else if (emailError.message.includes("ECONNREFUSED") || emailError.message.includes("timeout")) {
                     errorMessage = "Could not connect to email server. Please try again later.";
                 }
-                
+
                 return res.status(500).json({
                     success: false,
                     message: errorMessage,
@@ -476,7 +476,7 @@ export const verifyOtp = async (req, res) => {
             user.otp = null;
             user.otpExpiry = null;
             await user.save({ validateBeforeSave: false });
-            
+
             return res.status(400).json({
                 success: false,
                 message: "OTP has expired. Please request a new one."
@@ -582,7 +582,7 @@ export const googleLogin = async (req, res) => {
 
         // Check if GOOGLE_CLIENT_ID is configured (use fallback in development)
         const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
-        
+
         if (!googleClientId) {
             console.error("GOOGLE_CLIENT_ID is not configured in environment variables");
             return res.status(500).json({
@@ -595,8 +595,10 @@ export const googleLogin = async (req, res) => {
         // Verify Google token
         let ticket;
         try {
-            // Verify the token with the correct client ID
+            // Get the client ID (must match frontend)
             const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
+
+            // Verify the token - the audience must match the client ID used on frontend
             ticket = await client.verifyIdToken({
                 idToken: token,
                 audience: googleClientId,
@@ -607,21 +609,25 @@ export const googleLogin = async (req, res) => {
             console.error("Error details:", {
                 message: verifyError.message,
                 code: verifyError.code,
-                clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Using fallback"
+                clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Using fallback",
+                expectedAudience: googleClientId
             });
-            
+
             // Provide more specific error messages
-            let errorMessage = "Invalid Google token. Please try logging in again.";
+            let errorMessage = "Google login failed. Please try again.";
             if (verifyError.message?.includes("Wrong number of segments")) {
-                errorMessage = "Invalid token format. Please try again.";
+                errorMessage = "Invalid token format. Please try logging in again.";
             } else if (verifyError.message?.includes("Token used too early") || verifyError.message?.includes("Token used too late")) {
                 errorMessage = "Token has expired. Please try logging in again.";
             } else if (verifyError.message?.includes("Invalid token signature")) {
-                errorMessage = "Token signature is invalid. Please try again.";
+                errorMessage = "Token signature is invalid. Please try logging in again.";
             } else if (verifyError.message?.includes("Invalid audience")) {
-                errorMessage = "Token audience mismatch. Please check Google OAuth configuration.";
+                errorMessage = "Google OAuth configuration mismatch. Please contact support.";
+                console.error("Client ID mismatch - Frontend and backend must use the same Google Client ID");
+            } else if (verifyError.message?.includes("Token expired")) {
+                errorMessage = "Login session expired. Please try logging in again.";
             }
-            
+
             return res.status(401).json({
                 success: false,
                 message: errorMessage,
@@ -639,21 +645,12 @@ export const googleLogin = async (req, res) => {
             });
         }
 
-        // Check MongoDB connection before querying
+        // Check if MongoDB is connected
         if (mongoose.connection.readyState !== 1) {
-            console.error("MongoDB is not connected. Connection state:", mongoose.connection.readyState);
-            const stateMessages = {
-                0: 'disconnected',
-                1: 'connected',
-                2: 'connecting',
-                3: 'disconnecting'
-            };
             return res.status(503).json({
                 success: false,
-                message: "Database connection unavailable. Please check your MongoDB connection and try again.",
-                error: process.env.NODE_ENV === 'development' 
-                    ? `MongoDB connection state: ${mongoose.connection.readyState} (${stateMessages[mongoose.connection.readyState] || 'unknown'})` 
-                    : undefined
+                message: "MongoDB is not running. Please start MongoDB server and try again.",
+                help: "On Windows: Open Services (services.msc) and start 'MongoDB Server', or run 'net start MongoDB' in Command Prompt (as Administrator)"
             });
         }
 
@@ -664,7 +661,7 @@ export const googleLogin = async (req, res) => {
             // Create new user from Google
             // Generate a secure random password for Google OAuth users
             const randomPassword = 'google-oauth-' + crypto.randomBytes(32).toString('hex') + '-' + Date.now();
-            
+
             try {
                 user = await User.create({
                     name: name || email.split('@')[0],
@@ -674,7 +671,7 @@ export const googleLogin = async (req, res) => {
                     verified: true,
                     isEmailVerified: true,
                     status: 'active',
-                    role: 'buyer',
+                    role: 'individual',
                     lastLogin: new Date()
                 });
             } catch (createError) {
@@ -749,21 +746,38 @@ export const googleLogin = async (req, res) => {
     } catch (error) {
         console.error("Google Login Error:", error.message);
         console.error("Error details:", error);
-        
+
         // Provide more specific error messages
-        let errorMessage = "Invalid Google token or authentication failed.";
-        
+        let errorMessage = "Google login failed. Please try again.";
+        let statusCode = 500;
+
         if (error.message?.includes("Token used too early")) {
             errorMessage = "Token is not yet valid. Please try again.";
-        } else if (error.message?.includes("Token used too late")) {
+            statusCode = 401;
+        } else if (error.message?.includes("Token used too late") || error.message?.includes("Token expired")) {
             errorMessage = "Token has expired. Please try logging in again.";
+            statusCode = 401;
         } else if (error.message?.includes("Invalid token signature")) {
             errorMessage = "Invalid token signature. Please try logging in again.";
+            statusCode = 401;
         } else if (error.message?.includes("Wrong number of segments")) {
             errorMessage = "Invalid token format. Please try logging in again.";
+            statusCode = 400;
+        } else if (error.message?.includes("Invalid audience")) {
+            errorMessage = "Google OAuth configuration error. Please contact support.";
+            statusCode = 500;
+        } else if (error.name === "MongoError" || error.name === "MongoServerError") {
+            errorMessage = "Database error occurred. Please try again.";
+            statusCode = 500;
+        } else if (error.message?.includes("MongoDB") || error.message?.includes("connection") || error.message?.includes("ECONNREFUSED")) {
+            errorMessage = "Database is not connected. Please make sure MongoDB is running (start MongoDB Compass or MongoDB service) and try again.";
+            statusCode = 503;
+        } else if (mongoose.connection.readyState !== 1) {
+            errorMessage = "Database is not connected. Please make sure MongoDB is running and try again.";
+            statusCode = 503;
         }
-        
-        return res.status(401).json({
+
+        return res.status(statusCode).json({
             success: false,
             message: errorMessage,
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
