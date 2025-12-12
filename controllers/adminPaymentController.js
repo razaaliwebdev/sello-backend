@@ -1,6 +1,6 @@
 import User from '../models/userModel.js';
 import Logger from '../utils/logger.js';
-import { SUBSCRIPTION_PLANS } from './subscriptionController.js';
+import SubscriptionPlan from '../models/subscriptionPlanModel.js';
 
 /**
  * Get All User Payments (Admin)
@@ -166,11 +166,28 @@ export const adminUpdateSubscription = async (req, res) => {
         const { userId } = req.params;
         const { plan, duration = 30, isActive = true } = req.body;
 
-        if (!plan || !SUBSCRIPTION_PLANS[plan]) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid subscription plan'
-            });
+        // Try to get plan from database first
+        let selectedPlan = null;
+        const dbPlan = await SubscriptionPlan.findOne({ name: plan, isActive: true });
+        if (dbPlan) {
+            selectedPlan = {
+                name: dbPlan.displayName,
+                price: dbPlan.price,
+                duration: dbPlan.duration,
+                features: dbPlan.features,
+                maxListings: dbPlan.maxListings,
+                boostCredits: dbPlan.boostCredits
+            };
+        } else {
+            // Fallback to legacy plans
+            const { SUBSCRIPTION_PLANS: LEGACY_PLANS } = await import('./subscriptionController.js');
+            if (!LEGACY_PLANS[plan]) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid subscription plan'
+                });
+            }
+            selectedPlan = LEGACY_PLANS[plan];
         }
 
         const user = await User.findById(userId);
@@ -180,8 +197,6 @@ export const adminUpdateSubscription = async (req, res) => {
                 message: 'User not found'
             });
         }
-
-        const selectedPlan = SUBSCRIPTION_PLANS[plan];
         const startDate = new Date();
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + duration);

@@ -24,13 +24,23 @@ export const createSupportChat = async (req, res) => {
         }
 
         // Find admin user - get the first admin
-        const admin = await User.findOne({ role: 'admin' });
-        if (!admin) {
-            console.error("No admin user found in database. Please create an admin user.");
+        let admin;
+        try {
+            admin = await User.findOne({ role: 'admin' });
+            if (!admin) {
+                console.error("No admin user found in database. Please create an admin user.");
+                return res.status(500).json({
+                    success: false,
+                    message: "Support system is not available. Please contact support directly.",
+                    error: "No admin user found"
+                });
+            }
+        } catch (dbError) {
+            console.error("Database error finding admin user:", dbError);
             return res.status(500).json({
                 success: false,
-                message: "Support system is not available. Please contact support directly.",
-                error: "No admin user found"
+                message: "Database error. Please try again later.",
+                error: process.env.NODE_ENV === 'development' ? dbError.message : undefined
             });
         }
 
@@ -182,10 +192,22 @@ export const createSupportChat = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Create Support Chat Error:", error.message);
+        console.error("Create Support Chat Error:", error);
+        console.error("Error stack:", error.stack);
+        
+        // Provide more specific error messages
+        let errorMessage = "Server error. Please try again later.";
+        if (error.name === 'ValidationError') {
+            errorMessage = "Invalid data provided. Please check your input.";
+        } else if (error.name === 'CastError') {
+            errorMessage = "Invalid ID format.";
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
         return res.status(500).json({
             success: false,
-            message: "Server error. Please try again later.",
+            message: errorMessage,
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

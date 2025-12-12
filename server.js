@@ -43,7 +43,7 @@ if (process.env.ENABLE_CRON_JOBS === 'true') {
 // Start server regardless of DB connection status
 const startServer = () => {
     try {
-        const PORT = process.env.PORT || 3000;
+        const PORT = process.env.PORT || 4000;
         const server = http.createServer(app);
 
         // Initialize Socket.io with error handling
@@ -69,7 +69,13 @@ const startServer = () => {
         // Handle server errors
         server.on('error', (error) => {
             if (error.code === 'EADDRINUSE') {
-                console.error(`❌ Port ${PORT} is already in use. Please use a different port.`);
+                console.error(`❌ Port ${PORT} is already in use.`);
+                console.error(`\n💡 To fix this, please do one of the following:`);
+                console.error(`   1. Kill the process using port ${PORT}:`);
+                console.error(`      Windows: taskkill /F /PID <PID>`);
+                console.error(`      Or find PID: netstat -ano | findstr :${PORT}`);
+                console.error(`   2. Use a different port by setting PORT environment variable`);
+                console.error(`      Example: PORT=3001 npm run dev\n`);
                 process.exit(1);
             } else {
                 console.error('❌ Server error:', error);

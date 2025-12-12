@@ -2,6 +2,7 @@ import express from 'express';
 import {
     getUserProfile,
     updateProfile,
+    updateDealerProfile,
     getBoostCredits,
     saveCar,
     unsaveCar,
@@ -20,6 +21,11 @@ router.use(auth);
 // User Profile Routes
 router.get("/me", getUserProfile);
 router.put("/profile", upload.single("avatar"), updateProfile);
+router.put("/dealer-profile", upload.fields([
+    { name: 'avatar', maxCount: 1 },
+    { name: 'businessLicense', maxCount: 1 },
+    { name: 'showroomImages', maxCount: 10 }
+]), updateDealerProfile);
 router.get("/boost-credits", getBoostCredits);
 
 import { addReview, getUserReviews } from '../controllers/reviewController.js';

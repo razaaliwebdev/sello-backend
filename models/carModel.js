@@ -24,7 +24,7 @@ const carSchema = new mongoose.Schema(
         },
         engineCapacity: {
             type: Number,
-            required: true,
+            required: false, // Handled dynamically in controller
             min: 0,
         },
         transmission: { type: String, required: true, enum: ["Manual", "Automatic"] },
@@ -45,9 +45,23 @@ const carSchema = new mongoose.Schema(
             required: true,
             enum: ["GCC", "American", "Canadian", "European"],
         },
-        bodyType: {
+        // Vehicle Type Category (Car, Bus, Truck, Van, Bike, E-bike)
+        vehicleType: {
             type: String,
             required: true,
+            enum: ["Car", "Bus", "Truck", "Van", "Bike", "E-bike"],
+            default: "Car",
+            index: true,
+        },
+        // Reference to Category for vehicle type
+        vehicleTypeCategory: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Category",
+            default: null,
+        },
+        bodyType: {
+            type: String,
+            required: false, // Handled dynamically in controller
             enum: [
                 "Roadster",
                 "Cabriolet",
@@ -115,6 +129,17 @@ const carSchema = new mongoose.Schema(
         warranty: { type: String, required: true, enum: ["Yes", "No", "Doesn't Apply"] },
         numberOfCylinders: { type: Number, default: 4, max: 16 },
         ownerType: { type: String, required: true, enum: ["Owner", "Dealer", "Dealership"] },
+        // E-bike specific fields
+        batteryRange: {
+            type: Number,
+            default: null,
+            min: 0,
+        },
+        motorPower: {
+            type: Number,
+            default: null,
+            min: 0,
+        },
         images: [{ type: String }],
 
         // Legacy sold flags (kept for backwards compatibility)
@@ -226,11 +251,15 @@ carSchema.index({ postedBy: 1 });
 carSchema.index({ featured: 1, isBoosted: 1 });
 carSchema.index({ isSold: 1, isApproved: 1 });
 carSchema.index({ status: 1, autoDeleteDate: 1, isAutoDeleted: 1 });
+carSchema.index({ vehicleType: 1, status: 1, isApproved: 1 });
+carSchema.index({ vehicleTypeCategory: 1, status: 1, isApproved: 1 });
 // Text search indexes for keyword search
 carSchema.index({ title: "text", make: "text", model: "text", description: "text" });
 // Numeric indexes for range queries
 carSchema.index({ horsepower: 1 });
 carSchema.index({ engineCapacity: 1 });
+carSchema.index({ batteryRange: 1 });
+carSchema.index({ motorPower: 1 });
 carSchema.index({ price: 1 });
 carSchema.index({ year: 1 });
 carSchema.index({ mileage: 1 });

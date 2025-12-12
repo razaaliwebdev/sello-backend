@@ -2,6 +2,8 @@ import ContactForm from '../models/contactFormModel.js';
 import { Chat, Message } from '../models/chatModel.js';
 import User from '../models/userModel.js';
 import mongoose from 'mongoose';
+import Logger from '../utils/logger.js';
+import bcrypt from 'bcrypt';
 
 /**
  * Submit Contact Form
@@ -32,7 +34,7 @@ export const submitContactForm = async (req, res) => {
             data: contactForm
         });
     } catch (error) {
-        console.error("Submit Contact Form Error:", error.message);
+        Logger.error("Submit Contact Form Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -94,7 +96,7 @@ export const getAllContactForms = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get All Contact Forms Error:", error.message);
+        Logger.error("Get All Contact Forms Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -141,7 +143,7 @@ export const getContactFormById = async (req, res) => {
             data: contactForm
         });
     } catch (error) {
-        console.error("Get Contact Form Error:", error.message);
+        Logger.error("Get Contact Form Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -191,36 +193,65 @@ export const convertToChat = async (req, res) => {
         // Find or create user by email
         let user = await User.findOne({ email: contactForm.email });
         if (!user) {
-            // Create user if doesn't exist
-            user = await User.create({
-                name: `${contactForm.firstName} ${contactForm.lastName}`,
-                email: contactForm.email,
-                password: `temp-${Date.now()}`, // Temporary password
-                role: 'buyer',
-                status: 'active',
-                verified: false
-            });
+            try {
+                // Generate a secure temporary password (minimum 6 characters required)
+                const tempPassword = `Temp${Date.now()}${Math.random().toString(36).slice(2)}`;
+                
+                // Hash the password (required for User model)
+                const hashedPassword = await bcrypt.hash(tempPassword, 12);
+                
+                // Create user if doesn't exist
+                // Use 'individual' role (valid enum value) instead of 'buyer'
+                user = await User.create({
+                    name: `${contactForm.firstName} ${contactForm.lastName}`,
+                    email: contactForm.email.toLowerCase().trim(),
+                    password: hashedPassword, // Hashed temporary password (user will need to reset)
+                    role: 'individual', // Valid enum: 'individual', 'dealer', or 'admin'
+                    status: 'active',
+                    verified: false
+                });
+            } catch (userError) {
+                console.error("Error creating user:", userError);
+                // If user creation fails (e.g., email already exists, validation error), try to find again
+                user = await User.findOne({ email: contactForm.email.toLowerCase().trim() });
+                if (!user) {
+                    throw new Error(`Failed to create or find user: ${userError.message}`);
+                }
+            }
         }
 
         // Create support chat
-        const chat = await Chat.create({
-            participants: [user._id, req.user._id],
-            chatType: 'support',
-            subject: contactForm.subject,
-            priority: 'medium',
-            status: 'open',
-            lastMessage: contactForm.message,
-            lastMessageAt: new Date(),
-            unreadCount: new Map([[user._id.toString(), 0], [req.user._id.toString(), 0]])
-        });
+        let chat;
+        try {
+            chat = await Chat.create({
+                participants: [user._id, req.user._id],
+                chatType: 'support',
+                subject: contactForm.subject || 'Support Request',
+                priority: 'medium',
+                status: 'open',
+                lastMessage: contactForm.message || 'No message',
+                lastMessageAt: new Date(),
+                unreadCount: new Map([[user._id.toString(), 0], [req.user._id.toString(), 0]])
+            });
+        } catch (chatError) {
+            console.error("Error creating chat:", chatError);
+            throw new Error(`Failed to create chat: ${chatError.message}`);
+        }
 
         // Create initial message from contact form
-        await Message.create({
-            chat: chat._id,
-            sender: user._id,
-            message: contactForm.message,
-            messageType: 'text'
-        });
+        try {
+            await Message.create({
+                chat: chat._id,
+                sender: user._id,
+                message: contactForm.message || 'No message',
+                messageType: 'text'
+            });
+        } catch (messageError) {
+            console.error("Error creating message:", messageError);
+            // If message creation fails, delete the chat to maintain consistency
+            await Chat.findByIdAndDelete(chat._id);
+            throw new Error(`Failed to create message: ${messageError.message}`);
+        }
 
         // Update contact form
         contactForm.chatId = chat._id;
@@ -245,10 +276,23 @@ export const convertToChat = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Convert to Chat Error:", error.message);
+        console.error("Convert to Chat Error:", error);
+        console.error("Error stack:", error.stack);
+        
+        // Provide more specific error messages
+        let errorMessage = "Server error. Please try again later.";
+        if (error.name === 'ValidationError') {
+            errorMessage = `Validation error: ${error.message}`;
+        } else if (error.name === 'CastError') {
+            errorMessage = "Invalid ID format.";
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        Logger.error("Convert to Chat Error", error);
         return res.status(500).json({
             success: false,
-            message: "Server error. Please try again later.",
+            message: errorMessage,
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -304,7 +348,7 @@ export const updateContactFormStatus = async (req, res) => {
             data: contactForm
         });
     } catch (error) {
-        console.error("Update Contact Form Status Error:", error.message);
+        Logger.error("Update Contact Form Status Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -349,7 +393,7 @@ export const deleteContactForm = async (req, res) => {
             message: "Contact form deleted successfully."
         });
     } catch (error) {
-        console.error("Delete Contact Form Error:", error.message);
+        Logger.error("Delete Contact Form Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

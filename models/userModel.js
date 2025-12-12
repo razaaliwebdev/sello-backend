@@ -140,8 +140,57 @@ const userSchema = new mongoose.Schema(
             businessLicense: { type: String, default: null },
             businessAddress: { type: String, default: null },
             businessPhone: { type: String, default: null },
+            whatsappNumber: { type: String, default: null },
+            city: { type: String, default: null },
+            area: { type: String, default: null },
+            vehicleTypes: { type: String, default: null },
             verified: { type: Boolean, default: false },
-            verifiedAt: { type: Date, default: null }
+            verifiedAt: { type: Date, default: null },
+            // Enhanced dealer fields (PakWheels/Dubizzle style)
+            description: { type: String, default: null },
+            website: { type: String, default: null },
+            socialMedia: {
+                facebook: { type: String, default: null },
+                instagram: { type: String, default: null },
+                twitter: { type: String, default: null },
+                linkedin: { type: String, default: null }
+            },
+            businessHours: {
+                monday: { open: String, close: String, closed: { type: Boolean, default: false } },
+                tuesday: { open: String, close: String, closed: { type: Boolean, default: false } },
+                wednesday: { open: String, close: String, closed: { type: Boolean, default: false } },
+                thursday: { open: String, close: String, closed: { type: Boolean, default: false } },
+                friday: { open: String, close: String, closed: { type: Boolean, default: false } },
+                saturday: { open: String, close: String, closed: { type: Boolean, default: false } },
+                sunday: { open: String, close: String, closed: { type: Boolean, default: false } }
+            },
+            locations: [{
+                name: String,
+                address: String,
+                city: String,
+                area: String,
+                phone: String,
+                coordinates: {
+                    type: { type: String, enum: ["Point"], default: "Point" },
+                    coordinates: { type: [Number], default: [0, 0] }
+                }
+            }],
+            specialties: [{ type: String }], // e.g., "Luxury Cars", "Budget Cars", "Electric Vehicles"
+            yearsInBusiness: { type: Number, default: null },
+            totalCarsSold: { type: Number, default: 0 },
+            averageRating: { type: Number, default: 0, min: 0, max: 5 },
+            totalReviews: { type: Number, default: 0 },
+            showroomImages: [{ type: String }], // Images of the showroom
+            certifications: [{ type: String }], // Industry certifications
+            languages: [{ type: String }], // Languages spoken
+            paymentMethods: [{ type: String }], // Accepted payment methods
+            services: [{ type: String }], // Services offered (e.g., "Financing", "Trade-in", "Warranty")
+            establishedYear: { type: Number, default: null },
+            employeeCount: { type: String, default: null }, // e.g., "1-10", "11-50", "50+"
+            monthlyInventory: { type: Number, default: 0 }, // Average cars in inventory
+            featured: { type: Boolean, default: false }, // Featured dealer badge
+            featuredUntil: { type: Date, default: null },
+            subscriptionTier: { type: String, enum: ["free", "basic", "premium", "dealer"], default: "free" }
         },
         // 🚗 Cars posted by user (as seller)
         carsPosted: [

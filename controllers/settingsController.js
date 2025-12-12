@@ -1,5 +1,6 @@
 import Settings from '../models/settingsModel.js';
 import { createAuditLog } from '../utils/auditLogger.js';
+import Logger from '../utils/logger.js';
 
 /**
  * Get All Settings
@@ -38,7 +39,7 @@ export const getAllSettings = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get Settings Error:", error.message);
+        Logger.error("Get Settings Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -76,7 +77,7 @@ export const getSetting = async (req, res) => {
             data: setting
         });
     } catch (error) {
-        console.error("Get Setting Error:", error.message);
+        Logger.error("Get Setting Error", error, { userId: req.user?._id, key: req.params.key });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -151,7 +152,7 @@ export const upsertSetting = async (req, res) => {
             data: setting
         });
     } catch (error) {
-        console.error("Upsert Setting Error:", error.message);
+        Logger.error("Upsert Setting Error", error, { userId: req.user?._id, key: req.body.key });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -183,16 +184,16 @@ export const deleteSetting = async (req, res) => {
             });
         }
 
+        await createAuditLog(req.user, "setting_deleted", {
+            key
+        }, null, req);
+
         return res.status(200).json({
             success: true,
             message: "Setting deleted successfully."
         });
-
-        await createAuditLog(req.user, "setting_deleted", {
-            key
-        }, null, req);
     } catch (error) {
-        console.error("Delete Setting Error:", error.message);
+        Logger.error("Delete Setting Error", error, { userId: req.user?._id, key: req.params.key });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

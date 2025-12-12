@@ -1,5 +1,6 @@
 import User from '../models/userModel.js';
 import { uploadCloudinary } from '../utils/cloudinary.js';
+import Logger from '../utils/logger.js';
 
 /**
  * Get User Profile Controller
@@ -26,6 +27,7 @@ export const getUserProfile = async (req, res) => {
                 _id: user._id,
                 name: user.name,
                 email: user.email,
+                phone: user.phone,
                 avatar: user.avatar,
                 role: user.role,
                 adminRole: user.adminRole,
@@ -34,6 +36,11 @@ export const getUserProfile = async (req, res) => {
                 status: user.status,
                 verified: user.verified,
                 isEmailVerified: user.isEmailVerified,
+                dealerInfo: user.dealerInfo || null,
+                subscription: user.subscription || null,
+                boostCredits: user.boostCredits || 0,
+                sellerRating: user.sellerRating || 0,
+                reviewCount: user.reviewCount || 0,
                 carsPosted: user.carsPosted,
                 carsPurchased: user.carsPurchased,
                 savedCars: user.savedCars,
@@ -108,21 +115,21 @@ export const updateProfile = async (req, res) => {
             // Validate file type and size
             const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
             const maxSize = 5 * 1024 * 1024; // 5MB for avatars
-            
+
             if (!allowedTypes.includes(req.file.mimetype)) {
                 return res.status(400).json({
                     success: false,
                     message: "Invalid file type. Only JPEG, PNG, and WebP are allowed."
                 });
             }
-            
+
             if (req.file.size > maxSize) {
                 return res.status(400).json({
                     success: false,
                     message: "File too large. Maximum size is 5MB."
                 });
             }
-            
+
             const avatarUrl = await uploadCloudinary(req.file.buffer, {
                 folder: "avatars",
                 removeExif: true,
@@ -154,6 +161,207 @@ export const updateProfile = async (req, res) => {
         });
     } catch (error) {
         console.error("Update Profile Error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Update Dealer Profile Controller
+ * Allows dealers to update their business information, upload CNIC/license, etc.
+ */
+export const updateDealerProfile = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found."
+            });
+        }
+
+        if (user.role !== 'dealer') {
+            return res.status(403).json({
+                success: false,
+                message: "Only dealers can update dealer profile."
+            });
+        }
+
+        // Ensure dealerInfo exists
+        if (!user.dealerInfo) {
+            user.dealerInfo = {};
+        }
+
+        // Update basic user info
+        if (req.body.name) {
+            const trimmedName = req.body.name.trim();
+            if (trimmedName.length >= 2 && trimmedName.length <= 50) {
+                user.name = trimmedName;
+            }
+        }
+
+        if (req.body.phone) {
+            if (/^\+?\d{9,15}$/.test(req.body.phone.trim())) {
+                user.phone = req.body.phone.trim();
+            }
+        }
+
+        // Update avatar if provided
+        if (req.files && req.files.avatar && req.files.avatar[0]) {
+            const avatarUrl = await uploadCloudinary(req.files.avatar[0].buffer, {
+                folder: "avatars",
+                removeExif: true,
+                quality: 80,
+                format: "auto"
+            });
+            user.avatar = avatarUrl;
+        }
+
+        // Update dealer-specific information
+        const {
+            businessName,
+            businessAddress,
+            businessPhone,
+            whatsappNumber,
+            city,
+            area,
+            vehicleTypes,
+            description,
+            website,
+            facebook,
+            instagram,
+            twitter,
+            linkedin,
+            establishedYear,
+            employeeCount,
+            specialties,
+            languages,
+            paymentMethods,
+            services
+        } = req.body;
+
+        // Basic dealer info
+        if (businessName) user.dealerInfo.businessName = businessName.trim();
+        if (businessAddress) user.dealerInfo.businessAddress = businessAddress.trim();
+        if (businessPhone) user.dealerInfo.businessPhone = businessPhone.trim();
+        if (whatsappNumber) user.dealerInfo.whatsappNumber = whatsappNumber.trim();
+        if (city) user.dealerInfo.city = city.trim();
+        if (area) user.dealerInfo.area = area.trim();
+        if (vehicleTypes) user.dealerInfo.vehicleTypes = vehicleTypes.trim();
+        if (description) user.dealerInfo.description = description.trim();
+        if (website) user.dealerInfo.website = website.trim();
+        if (establishedYear) user.dealerInfo.establishedYear = parseInt(establishedYear);
+        if (employeeCount) user.dealerInfo.employeeCount = employeeCount;
+
+        // Social media
+        if (!user.dealerInfo.socialMedia) {
+            user.dealerInfo.socialMedia = {};
+        }
+        if (facebook) user.dealerInfo.socialMedia.facebook = facebook.trim();
+        if (instagram) user.dealerInfo.socialMedia.instagram = instagram.trim();
+        if (twitter) user.dealerInfo.socialMedia.twitter = twitter.trim();
+        if (linkedin) user.dealerInfo.socialMedia.linkedin = linkedin.trim();
+
+        // Parse arrays
+        if (specialties) {
+            try {
+                user.dealerInfo.specialties = typeof specialties === 'string'
+                    ? JSON.parse(specialties)
+                    : (Array.isArray(specialties) ? specialties : specialties.split(',').map(s => s.trim()));
+            } catch (e) {
+                user.dealerInfo.specialties = typeof specialties === 'string'
+                    ? specialties.split(',').map(s => s.trim())
+                    : [];
+            }
+        }
+
+        if (languages) {
+            try {
+                user.dealerInfo.languages = typeof languages === 'string'
+                    ? JSON.parse(languages)
+                    : (Array.isArray(languages) ? languages : languages.split(',').map(l => l.trim()));
+            } catch (e) {
+                user.dealerInfo.languages = typeof languages === 'string'
+                    ? languages.split(',').map(l => l.trim())
+                    : [];
+            }
+        }
+
+        if (paymentMethods) {
+            try {
+                user.dealerInfo.paymentMethods = typeof paymentMethods === 'string'
+                    ? JSON.parse(paymentMethods)
+                    : (Array.isArray(paymentMethods) ? paymentMethods : paymentMethods.split(',').map(p => p.trim()));
+            } catch (e) {
+                user.dealerInfo.paymentMethods = typeof paymentMethods === 'string'
+                    ? paymentMethods.split(',').map(p => p.trim())
+                    : [];
+            }
+        }
+
+        if (services) {
+            try {
+                user.dealerInfo.services = typeof services === 'string'
+                    ? JSON.parse(services)
+                    : (Array.isArray(services) ? services : services.split(',').map(s => s.trim()));
+            } catch (e) {
+                user.dealerInfo.services = typeof services === 'string'
+                    ? services.split(',').map(s => s.trim())
+                    : [];
+            }
+        }
+
+        // Upload business license/CNIC if provided
+        if (req.files && req.files.businessLicense && req.files.businessLicense[0]) {
+            const licenseUrl = await uploadCloudinary(req.files.businessLicense[0].buffer, {
+                folder: "dealer-documents",
+                quality: 90
+            });
+            user.dealerInfo.businessLicense = licenseUrl;
+            // Reset verification if license is updated (admin needs to re-verify)
+            if (user.dealerInfo.verified) {
+                user.dealerInfo.verified = false;
+                user.dealerInfo.verifiedAt = null;
+            }
+        }
+
+        // Upload showroom images if provided
+        if (req.files && req.files.showroomImages && req.files.showroomImages.length > 0) {
+            const showroomImageUrls = await Promise.all(
+                req.files.showroomImages.map(file =>
+                    uploadCloudinary(file.buffer, {
+                        folder: "showroom-images",
+                        quality: 85
+                    })
+                )
+            );
+            user.dealerInfo.showroomImages = [
+                ...(user.dealerInfo.showroomImages || []),
+                ...showroomImageUrls
+            ];
+        }
+
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Dealer profile updated successfully.",
+            data: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                avatar: user.avatar,
+                dealerInfo: user.dealerInfo
+            }
+        });
+    } catch (error) {
+        Logger.error("Update Dealer Profile Error:", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

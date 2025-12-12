@@ -23,7 +23,7 @@ const categorySchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ["car", "blog", "location"],
+        enum: ["car", "blog", "location", "vehicle"],
         required: true
     },
     subType: {

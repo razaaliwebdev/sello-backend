@@ -6,6 +6,7 @@ import User from '../models/userModel.js';
 import { parseArray, buildCarQuery } from '../utils/parseArray.js';
 import Logger from '../utils/logger.js';
 import { AppError, asyncHandler } from '../middlewares/errorHandler.js';
+import { validateRequiredFields } from '../utils/vehicleFieldConfig.js';
 
 
 
@@ -69,28 +70,26 @@ export const createCar = async (req, res) => {
             title, description, make, model, variant, year, condition, price, colorExterior,
             colorInterior, fuelType, engineCapacity, transmission, mileage, features,
             regionalSpec, bodyType, city, location, sellerType, carDoors, contactNumber,
-            geoLocation, horsepower, warranty, numberOfCylinders, ownerType,
+            geoLocation, horsepower, warranty, numberOfCylinders, ownerType, vehicleType, vehicleTypeCategory,
+            batteryRange, motorPower,
         } = req.body;
 
-        // Validate required fields - optimized validation
-        const requiredFields = [
-            'title', 'make', 'model', 'year', 'condition', 'price', 'fuelType',
-            'engineCapacity', 'transmission', 'regionalSpec', 'bodyType', 'city',
-            'contactNumber', 'sellerType', 'warranty', 'ownerType', 'geoLocation',
-        ];
-
-        const missing = [];
-        requiredFields.forEach(key => {
-            const value = req.body[key];
-            if (!value || (typeof value === 'string' && value.trim() === '')) {
-                missing.push(key);
-            }
-        });
-
-        if (missing.length) {
+        // Validate and set vehicleType first (needed for dynamic validation)
+        const validVehicleTypes = ["Car", "Bus", "Truck", "Van", "Bike", "E-bike"];
+        const selectedVehicleType = (vehicleType || "Car").trim();
+        if (!validVehicleTypes.includes(selectedVehicleType)) {
             return res.status(400).json({
                 success: false,
-                message: `Missing required fields: ${missing.join(', ')}`,
+                message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(", ")}`,
+            });
+        }
+
+        // Validate required fields dynamically based on vehicle type
+        const validation = validateRequiredFields(selectedVehicleType, req.body);
+        if (!validation.isValid) {
+            return res.status(400).json({
+                success: false,
+                message: `Missing required fields: ${validation.missing.join(', ')}`,
             });
         }
 
@@ -217,6 +216,33 @@ export const createCar = async (req, res) => {
         }
 
 
+        // Vehicle type already validated above
+
+        // Validate vehicleTypeCategory if provided
+        let vehicleTypeCategoryId = null;
+        if (vehicleTypeCategory) {
+            if (!mongoose.Types.ObjectId.isValid(vehicleTypeCategory)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid vehicle type category ID.",
+                });
+            }
+            // Verify category exists and is of type "vehicle"
+            const Category = (await import('../models/categoryModel.js')).default;
+            const category = await Category.findOne({ 
+                _id: vehicleTypeCategory, 
+                type: "vehicle",
+                isActive: true 
+            });
+            if (!category) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid vehicle type category. Category must exist and be active.",
+                });
+            }
+            vehicleTypeCategoryId = vehicleTypeCategory;
+        }
+
         // Create car document - optimized with proper type conversion and trimming
         const carData = {
             title: String(title).trim(),
@@ -230,30 +256,83 @@ export const createCar = async (req, res) => {
             colorExterior: (colorExterior || 'N/A').trim(),
             colorInterior: (colorInterior || 'N/A').trim(),
             fuelType: String(fuelType).trim(),
-            engineCapacity: parseInt(engineCapacity, 10),
             transmission: String(transmission).trim(),
             mileage: parseInt(mileage, 10) || 0,
             features: parsedFeatures, // Already parsed and validated by parseArray
             regionalSpec: String(regionalSpec).trim(),
-            bodyType: String(bodyType).trim(),
+            vehicleType: selectedVehicleType,
+            vehicleTypeCategory: vehicleTypeCategoryId,
             city: String(city).trim(),
             location: (location || '').trim(),
             sellerType: String(sellerType).trim(),
-            carDoors: parseInt(carDoors, 10) || 4,
             contactNumber: String(contactNumber).trim(),
             geoLocation: {
                 type: 'Point',
                 coordinates: parsedGeoLocation, // [longitude, latitude]
             },
-            horsepower: parseInt(horsepower, 10) || 0,
             warranty: String(warranty).trim(),
-            numberOfCylinders: parseInt(numberOfCylinders, 10) || 4,
             ownerType: String(ownerType).trim(),
             images, // Array of Cloudinary URLs
             postedBy: req.user._id, // Set from authenticated user
             isApproved: true, // Auto-approve by default
             status: 'active', // Set initial status
         };
+
+        // Conditionally add fields based on vehicle type
+        // Engine Capacity - required for all except E-bike
+        if (selectedVehicleType !== "E-bike") {
+            const engineCap = parseInt(engineCapacity, 10);
+            if (!isNaN(engineCap) && engineCap > 0) {
+                carData.engineCapacity = engineCap;
+            }
+        }
+        // Don't set engineCapacity for E-bike (even if sent, ignore it)
+
+        // Body Type - required for Car and Van only
+        if (selectedVehicleType === "Car" || selectedVehicleType === "Van") {
+            if (bodyType && bodyType.trim() !== '') {
+                carData.bodyType = String(bodyType).trim();
+            }
+        }
+        // Don't set bodyType for other vehicle types
+
+        // Car Doors - only for Car and Van
+        if (selectedVehicleType === "Car" || selectedVehicleType === "Van") {
+            const doors = parseInt(carDoors, 10);
+            carData.carDoors = (!isNaN(doors) && doors > 0) ? doors : 4;
+        }
+        // Don't set carDoors for other vehicle types
+
+        // Horsepower - optional for most, not for E-bike
+        if (selectedVehicleType !== "E-bike") {
+            const hp = parseInt(horsepower, 10);
+            if (!isNaN(hp) && hp >= 0) {
+                carData.horsepower = hp;
+            }
+        }
+        // Don't set horsepower for E-bike
+
+        // Number of Cylinders - not for E-bike or Bike
+        if (selectedVehicleType !== "E-bike" && selectedVehicleType !== "Bike") {
+            const cyl = parseInt(numberOfCylinders, 10);
+            if (!isNaN(cyl) && cyl > 0) {
+                carData.numberOfCylinders = cyl;
+            }
+        }
+        // Don't set numberOfCylinders for E-bike or Bike
+
+        // E-bike specific fields - only set for E-bike
+        if (selectedVehicleType === "E-bike") {
+            const batRange = parseInt(batteryRange, 10);
+            if (!isNaN(batRange) && batRange > 0) {
+                carData.batteryRange = batRange;
+            }
+            const motPower = parseInt(motorPower, 10);
+            if (!isNaN(motPower) && motPower > 0) {
+                carData.motorPower = motPower;
+            }
+        }
+        // Don't set batteryRange/motorPower for non-E-bike vehicles
 
         // console.log('Car data before saving:', carData);
 
@@ -427,7 +506,10 @@ export const editCar = async (req, res) => {
             id,
             updateData,
             { new: true, runValidators: true }
-        ).populate("postedBy", "name email role");
+        ).populate({
+            path: "postedBy",
+            select: "name email role avatar dealerInfo"
+        });
 
         return res.status(200).json({
             success: true,
@@ -494,7 +576,10 @@ export const getMyCars = async (req, res) => {
             status: { $ne: "deleted" },
         })
             .sort({ createdAt: -1 })
-            .populate("postedBy", "name email role");
+            .populate({
+                path: "postedBy",
+                select: "name email role"
+            });
 
         return res.status(200).json({
             message: "My Cars Fetched Successfully.",
@@ -580,12 +665,40 @@ export const getAllCars = async (req, res) => {
             };
         }
 
+        // Add vehicleType filter if provided
+        if (req.query.vehicleType) {
+            const validVehicleTypes = ["Car", "Bus", "Truck", "Van", "Bike", "E-bike"];
+            const vehicleTypes = Array.isArray(req.query.vehicleType) 
+                ? req.query.vehicleType 
+                : [req.query.vehicleType];
+            const validTypes = vehicleTypes.filter(vt => validVehicleTypes.includes(vt));
+            if (validTypes.length > 0) {
+                query.vehicleType = { $in: validTypes };
+            }
+        }
+
+        // Add vehicleTypeCategory filter if provided
+        if (req.query.vehicleTypeCategory) {
+            if (mongoose.Types.ObjectId.isValid(req.query.vehicleTypeCategory)) {
+                query.vehicleTypeCategory = new mongoose.Types.ObjectId(req.query.vehicleTypeCategory);
+            }
+        }
+
+        // Add featured filter if provided
+        if (req.query.featured === 'true' || req.query.featured === true) {
+            query.featured = true;
+            console.log('Featured filter applied:', query.featured);
+        }
+
         // Fetch cars with pagination
         // Sort: Featured first, then boosted (by priority), then by creation date
         const cars = await Car.find(query)
             .skip(skip)
             .limit(limit)
-            .populate("postedBy", "name email role sellerRating reviewCount isVerified")
+            .populate({
+                path: "postedBy",
+                select: "name email role sellerRating reviewCount isVerified dealerInfo"
+            })
             .sort({
                 featured: -1,
                 isBoosted: -1,
@@ -644,7 +757,10 @@ export const getSingleCar = async (req, res) => {
             });
         }
 
-        const car = await Car.findById(id).populate("postedBy", "name email role sellerRating reviewCount isVerified");
+        const car = await Car.findById(id).populate({
+            path: "postedBy",
+            select: "name email role sellerRating reviewCount isVerified avatar dealerInfo"
+        });
 
         if (!car) {
             return res.status(404).json({
@@ -818,9 +934,11 @@ export const getFilteredCars = async (req, res) => {
         // Build filter query - show approved cars (or cars without isApproved field)
         let filter, locationFilter;
         try {
+            console.log('getFilteredCars - req.query:', JSON.stringify(req.query, null, 2));
             const queryResult = buildCarQuery(req.query);
             filter = queryResult.filter;
             locationFilter = queryResult.locationFilter;
+            console.log('getFilteredCars - built filter:', JSON.stringify(filter, null, 2));
         } catch (queryError) {
             Logger.warn('Invalid filter query parameters', { error: queryError.message, query: req.query });
             return res.status(400).json({
@@ -857,6 +975,8 @@ export const getFilteredCars = async (req, res) => {
                 visibilityFilter
             ]
         };
+        
+        console.log('getFilteredCars - finalFilter:', JSON.stringify(finalFilter, null, 2));
 
         // Add geospatial filter if location radius is specified
         if (locationFilter.radius && locationFilter.userLocation) {
@@ -912,10 +1032,18 @@ export const getFilteredCars = async (req, res) => {
                     .sort(sort)
                     .skip(skip)
                     .limit(limit)
-                    .populate("postedBy", "name email role sellerRating reviewCount isVerified")
+                    .populate({
+                        path: "postedBy",
+                        select: "name email role sellerRating reviewCount isVerified avatar dealerInfo"
+                    })
                     .lean(),
                 Car.countDocuments(finalFilter)
             ]);
+            
+            console.log(`getFilteredCars - Found ${cars.length} cars (total: ${total}) with featured filter`);
+            if (req.query.featured === 'true' || req.query.featured === true) {
+                console.log('Featured cars details:', cars.map(c => ({ id: c._id, title: c.title, featured: c.featured, isApproved: c.isApproved, status: c.status })));
+            }
         } catch (dbError) {
             Logger.error('Database query error in getFilteredCars', dbError);
             return res.status(500).json({

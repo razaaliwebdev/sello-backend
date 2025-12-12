@@ -131,11 +131,28 @@ export const createTestimonial = async (req, res) => {
  */
 export const getAllTestimonials = async (req, res) => {
     try {
-        const { isActive, featured } = req.query;
+        const { isActive, featured, createdBy } = req.query;
         const query = {};
 
-        if (isActive !== undefined) query.isActive = isActive === 'true';
-        if (featured !== undefined) query.featured = featured === 'true';
+        if (isActive !== undefined) {
+            // Handle both string and boolean values
+            if (isActive === 'true' || isActive === true) {
+                query.isActive = true;
+            } else if (isActive === 'false' || isActive === false) {
+                query.isActive = false;
+            }
+        }
+        if (featured !== undefined) {
+            if (featured === 'true' || featured === true) {
+                query.featured = true;
+            } else if (featured === 'false' || featured === false) {
+                query.featured = false;
+            }
+        }
+        // Support filtering by creator (for fetching user's own reviews)
+        if (createdBy && mongoose.Types.ObjectId.isValid(createdBy)) {
+            query.createdBy = new mongoose.Types.ObjectId(createdBy);
+        }
 
         const testimonials = await Testimonial.find(query)
             .populate("createdBy", "name email")

@@ -1,4 +1,6 @@
 // utils/parseArray.js - Optimized for FormData arrays
+import mongoose from 'mongoose';
+
 export const parseArray = (val) => {
     if (!val) return [];
     
@@ -78,6 +80,31 @@ export const buildCarQuery = (query) => {
     });
     }
 
+    // Vehicle Type filtering
+    if (query.vehicleType) {
+        const validVehicleTypes = ["Car", "Bus", "Truck", "Van", "Bike", "E-bike"];
+        const vehicleTypes = parseArray(query.vehicleType);
+        if (vehicleTypes.length > 0) {
+            const validTypes = vehicleTypes.filter(vt => validVehicleTypes.includes(vt));
+            if (validTypes.length > 0) {
+                filter.vehicleType = { $in: validTypes };
+            }
+        }
+    }
+
+    // Vehicle Type Category filtering (by category ID)
+    if (query.vehicleTypeCategory) {
+        if (mongoose.Types.ObjectId.isValid(query.vehicleTypeCategory)) {
+            filter.vehicleTypeCategory = new mongoose.Types.ObjectId(query.vehicleTypeCategory);
+        }
+    }
+
+    // Featured filter
+    if (query.featured === 'true' || query.featured === true || query.featured === '1') {
+        filter.featured = true;
+        console.log('Featured filter applied in buildCarQuery:', { featured: query.featured, type: typeof query.featured });
+    }
+
     // Enum validation for single-value fields
     const enumFields = {
         condition: ["New", "Used"],
@@ -141,6 +168,30 @@ export const buildCarQuery = (query) => {
             filter.horsepower = {};
             if (!isNaN(hpMin)) filter.horsepower.$gte = hpMin;
             if (!isNaN(hpMax) && hpMax !== Infinity) filter.horsepower.$lte = hpMax;
+        }
+    }
+
+    // Battery Range range (numeric) - E-bike specific
+    if (query.batteryRangeMin || query.batteryRangeMax) {
+        const batteryRangeMin = query.batteryRangeMin ? Number(query.batteryRangeMin) : 0;
+        const batteryRangeMax = query.batteryRangeMax ? Number(query.batteryRangeMax) : Infinity;
+        
+        if (!isNaN(batteryRangeMin) || !isNaN(batteryRangeMax)) {
+            filter.batteryRange = {};
+            if (!isNaN(batteryRangeMin)) filter.batteryRange.$gte = batteryRangeMin;
+            if (!isNaN(batteryRangeMax) && batteryRangeMax !== Infinity) filter.batteryRange.$lte = batteryRangeMax;
+        }
+    }
+
+    // Motor Power range (numeric) - E-bike specific
+    if (query.motorPowerMin || query.motorPowerMax) {
+        const motorPowerMin = query.motorPowerMin ? Number(query.motorPowerMin) : 0;
+        const motorPowerMax = query.motorPowerMax ? Number(query.motorPowerMax) : Infinity;
+        
+        if (!isNaN(motorPowerMin) || !isNaN(motorPowerMax)) {
+            filter.motorPower = {};
+            if (!isNaN(motorPowerMin)) filter.motorPower.$gte = motorPowerMin;
+            if (!isNaN(motorPowerMax) && motorPowerMax !== Infinity) filter.motorPower.$lte = motorPowerMax;
         }
     }
 

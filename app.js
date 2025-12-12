@@ -29,6 +29,7 @@ import newsletterRouter from './routes/newsletterRoutes.js';
 import reviewRouter from './routes/reviewRoutes.js';
 import recommendationsRouter from './routes/recommendationsRoutes.js';
 import subscriptionRouter from './routes/subscriptionRoutes.js';
+import subscriptionPlanRouter from './routes/subscriptionPlanRoutes.js';
 import { performanceMonitor } from './middlewares/performanceMiddleware.js';
 import Logger from './utils/logger.js';
 import mongoose from 'mongoose';
@@ -67,7 +68,7 @@ app.use(compression());
 // CORS configuration - supports multiple origins from environment variable
 const allowedOrigins = process.env.CLIENT_URL
   ? process.env.CLIENT_URL.split(',').map(url => url.trim())
-  : ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://localhost:5174"];
+  : ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4000", "http://localhost:5174"];
 
 // Add production URL if provided
 if (process.env.PRODUCTION_URL) {
@@ -155,6 +156,7 @@ app.use("/api/newsletter", newsletterRouter);
 app.use("/api/reviews", reviewRouter);
 app.use("/api/recommendations", recommendationsRouter);
 app.use("/api/subscriptions", subscriptionRouter);
+app.use("/api/subscription-plans", subscriptionPlanRouter);
 
 // Health check route
 app.get("/", (req, res) => {

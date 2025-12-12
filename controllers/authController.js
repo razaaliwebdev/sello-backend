@@ -127,6 +127,83 @@ export const register = async (req, res) => {
 
         // Add dealer-specific information
         if (role === "dealer") {
+            const {
+                description,
+                website,
+                facebook,
+                instagram,
+                twitter,
+                linkedin,
+                establishedYear,
+                employeeCount,
+                specialties,
+                languages,
+                paymentMethods,
+                services
+            } = req.body;
+
+            // Parse JSON strings if they exist
+            let parsedSpecialties = [];
+            let parsedLanguages = [];
+            let parsedPaymentMethods = [];
+            let parsedServices = [];
+
+            try {
+                if (specialties) {
+                    if (typeof specialties === 'string') {
+                        parsedSpecialties = JSON.parse(specialties);
+                    } else if (Array.isArray(specialties)) {
+                        parsedSpecialties = specialties;
+                    } else {
+                        parsedSpecialties = specialties.split(',').map(s => s.trim());
+                    }
+                }
+            } catch (e) {
+                parsedSpecialties = typeof specialties === 'string' ? specialties.split(',').map(s => s.trim()) : [];
+            }
+
+            try {
+                if (languages) {
+                    if (typeof languages === 'string') {
+                        parsedLanguages = JSON.parse(languages);
+                    } else if (Array.isArray(languages)) {
+                        parsedLanguages = languages;
+                    } else {
+                        parsedLanguages = languages.split(',').map(l => l.trim());
+                    }
+                }
+            } catch (e) {
+                parsedLanguages = typeof languages === 'string' ? languages.split(',').map(l => l.trim()) : [];
+            }
+
+            try {
+                if (paymentMethods) {
+                    if (typeof paymentMethods === 'string') {
+                        parsedPaymentMethods = JSON.parse(paymentMethods);
+                    } else if (Array.isArray(paymentMethods)) {
+                        parsedPaymentMethods = paymentMethods;
+                    } else {
+                        parsedPaymentMethods = paymentMethods.split(',').map(p => p.trim());
+                    }
+                }
+            } catch (e) {
+                parsedPaymentMethods = typeof paymentMethods === 'string' ? paymentMethods.split(',').map(p => p.trim()) : [];
+            }
+
+            try {
+                if (services) {
+                    if (typeof services === 'string') {
+                        parsedServices = JSON.parse(services);
+                    } else if (Array.isArray(services)) {
+                        parsedServices = services;
+                    } else {
+                        parsedServices = services.split(',').map(s => s.trim());
+                    }
+                }
+            } catch (e) {
+                parsedServices = typeof services === 'string' ? services.split(',').map(s => s.trim()) : [];
+            }
+
             userData.dealerInfo = {
                 businessName: dealerName || name,
                 businessLicense: cnicUrl || null,
@@ -137,7 +214,40 @@ export const register = async (req, res) => {
                 area: area || null,
                 vehicleTypes: vehicleTypes || null,
                 verified: false,
-                verifiedAt: null
+                verifiedAt: null,
+                // Enhanced fields
+                description: description || null,
+                website: website || null,
+                socialMedia: {
+                    facebook: facebook || null,
+                    instagram: instagram || null,
+                    twitter: twitter || null,
+                    linkedin: linkedin || null
+                },
+                establishedYear: establishedYear ? parseInt(establishedYear) : null,
+                employeeCount: employeeCount || null,
+                specialties: parsedSpecialties,
+                languages: parsedLanguages,
+                paymentMethods: parsedPaymentMethods,
+                services: parsedServices,
+                businessHours: {
+                    monday: { open: "09:00", close: "18:00", closed: false },
+                    tuesday: { open: "09:00", close: "18:00", closed: false },
+                    wednesday: { open: "09:00", close: "18:00", closed: false },
+                    thursday: { open: "09:00", close: "18:00", closed: false },
+                    friday: { open: "09:00", close: "18:00", closed: false },
+                    saturday: { open: "09:00", close: "18:00", closed: false },
+                    sunday: { open: "09:00", close: "18:00", closed: false }
+                },
+                locations: [],
+                showroomImages: [],
+                certifications: [],
+                totalCarsSold: 0,
+                averageRating: 0,
+                totalReviews: 0,
+                monthlyInventory: 0,
+                featured: false,
+                subscriptionTier: "free"
             };
             // Also store in main user fields for easy access
             userData.phone = mobileNumber;
@@ -263,7 +373,11 @@ export const login = async (req, res) => {
                     status: user.status,
                     verified: user.verified,
                     isEmailVerified: user.isEmailVerified,
-                    lastLogin: user.lastLogin
+                    lastLogin: user.lastLogin,
+                    adminRole: user.adminRole || null,
+                    roleId: user.roleId || null,
+                    permissions: user.permissions || {},
+                    dealerInfo: user.dealerInfo || null
                 },
                 token
             }

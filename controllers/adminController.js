@@ -3,6 +3,7 @@ import Car from '../models/carModel.js';
 import CustomerRequest from '../models/customerRequestModel.js';
 import ListingHistory from '../models/listingHistoryModel.js';
 import mongoose from 'mongoose';
+import Logger from '../utils/logger.js';
 
 /**
  * Admin Dashboard Stats
@@ -248,7 +249,7 @@ export const getDashboardStats = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get Dashboard Stats Error:", error.message);
+        Logger.error("Get Dashboard Stats Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -293,7 +294,7 @@ export const verifyUser = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Verify User Error:", error.message);
+        Logger.error("Verify User Error", error, { userId: req.user?._id, targetUserId: req.params.userId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later."
@@ -355,13 +356,6 @@ export const getAllUsers = async (req, res) => {
             query.$and = conditions;
         }
 
-        // Debug: Log the query structure (always log for troubleshooting)
-        console.log('=== USER QUERY DEBUG ===');
-        console.log('Role filter:', role);
-        console.log('Status filter:', status);
-        console.log('Search:', search);
-        console.log('Query:', JSON.stringify(query, null, 2));
-
         // Add status filter
         if (status) {
             if (query.$and) {
@@ -400,18 +394,6 @@ export const getAllUsers = async (req, res) => {
             .sort({ createdAt: -1 });
 
         const total = await User.countDocuments(query);
-
-        // Debug: Log results for troubleshooting (always log)
-        console.log(`Found ${users.length} users (total: ${total})`);
-        if (users.length > 0) {
-            console.log('Sample user roles:', users.slice(0, 3).map(u => ({
-                name: u.name,
-                role: u.role,
-                adminRole: u.adminRole
-            })));
-        } else {
-            console.log('No users found with query:', JSON.stringify(query, null, 2));
-        }
 
         return res.status(200).json({
             success: true,
@@ -468,7 +450,7 @@ export const getUserById = async (req, res) => {
             data: user
         });
     } catch (error) {
-        console.error("Get User By ID Error:", error.message);
+        Logger.error("Get User By ID Error", error, { userId: req.user?._id, targetUserId: req.params.userId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -542,7 +524,7 @@ export const updateUser = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Update User Error:", error.message);
+        Logger.error("Update User Error", error, { userId: req.user?._id, targetUserId: req.params.userId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -592,7 +574,7 @@ export const deleteUser = async (req, res) => {
             message: "User and associated data deleted successfully."
         });
     } catch (error) {
-        console.error("Delete User Error:", error.message);
+        Logger.error("Delete User Error", error, { userId: req.user?._id, targetUserId: req.params.userId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -682,7 +664,7 @@ export const getAllCars = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get All Cars (Admin) Error:", error.message);
+        Logger.error("Get All Cars (Admin) Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -745,7 +727,7 @@ export const approveCar = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Approve Car Error:", error.message);
+        Logger.error("Approve Car Error", error, { userId: req.user?._id, carId: req.params.carId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -800,7 +782,7 @@ export const deleteCar = async (req, res) => {
                 deletedAt: new Date(),
             });
         } catch (historyError) {
-            console.error("Failed to create listing history on admin delete:", historyError);
+            Logger.error("Failed to create listing history on admin delete", historyError, { carId });
             // Do not block deletion if history fails, but log it
         }
 
@@ -822,7 +804,7 @@ export const deleteCar = async (req, res) => {
             message: "Car deleted successfully.",
         });
     } catch (error) {
-        console.error("Delete Car (Admin) Error:", error.message);
+        Logger.error("Delete Car (Admin) Error", error, { userId: req.user?._id, carId: req.params.carId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -916,7 +898,7 @@ export const getListingHistory = async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("Get Listing History Error:", error.message);
+        Logger.error("Get Listing History Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -940,6 +922,11 @@ export const featureCar = async (req, res) => {
 
         const { carId } = req.params;
         const { featured } = req.body;
+        
+        // Log for debugging (only in development)
+        if (process.env.NODE_ENV === 'development') {
+            console.log("Feature Car Request:", { carId, featured, body: req.body, params: req.params, user: req.user?._id });
+        }
 
         if (!mongoose.Types.ObjectId.isValid(carId)) {
             return res.status(400).json({
@@ -956,20 +943,43 @@ export const featureCar = async (req, res) => {
             });
         }
 
-        car.featured = featured === true || featured === 'true';
-        await car.save();
+        // Convert featured to boolean (same pattern as approveCar)
+        const featuredValue = featured === true || featured === 'true';
+        
+        // Use updateOne to avoid validation issues with required fields
+        const updateResult = await Car.updateOne(
+            { _id: carId },
+            { $set: { featured: featuredValue } }
+        );
+        
+        if (updateResult.matchedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Car not found."
+            });
+        }
+        
+        if (updateResult.modifiedCount === 0) {
+            // Car was found but not modified (might already have the same value)
+            console.log("Car featured status unchanged:", { carId, featuredValue, currentValue: car.featured });
+        }
 
         return res.status(200).json({
             success: true,
-            message: `Car ${car.featured ? 'featured' : 'unfeatured'} successfully.`,
+            message: `Car ${featuredValue ? 'featured' : 'unfeatured'} successfully.`,
             data: {
                 _id: car._id,
                 title: car.title,
-                featured: car.featured
+                featured: featuredValue
             }
         });
     } catch (error) {
-        console.error("Feature Car Error:", error.message);
+        Logger.error("Feature Car Error", error, { 
+            userId: req.user?._id, 
+            carId: req.params.carId,
+            featured: req.body.featured
+        });
+        
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -1084,10 +1094,18 @@ export const verifyDealer = async (req, res) => {
             });
         }
 
+        // Ensure dealerInfo exists
+        if (!user.dealerInfo) {
+            user.dealerInfo = {};
+        }
+
         user.dealerInfo.verified = verified === true || verified === 'true';
         user.dealerInfo.verifiedAt = verified ? new Date() : null;
 
         await user.save();
+
+        // Return updated user with populated dealerInfo
+        await user.populate('dealerInfo');
 
         return res.status(200).json({
             success: true,
@@ -1100,7 +1118,7 @@ export const verifyDealer = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Verify Dealer Error:", error.message);
+        Logger.error("Verify Dealer Error", error, { userId: req.user?._id, targetUserId: req.params.userId });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

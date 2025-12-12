@@ -136,7 +136,7 @@ export const getAllBlogs = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
-        const { status, category, author, search, isFeatured } = req.query;
+        const { status, category, author, search, isFeatured, exclude } = req.query;
 
         const query = {};
         
@@ -151,6 +151,14 @@ export const getAllBlogs = async (req, res) => {
         if (category) query.category = category;
         if (author) query.author = author;
         if (isFeatured !== undefined) query.isFeatured = isFeatured === 'true';
+        
+        // Exclude specific blog ID (for related blogs)
+        if (exclude) {
+            if (mongoose.Types.ObjectId.isValid(exclude)) {
+                query._id = { $ne: new mongoose.Types.ObjectId(exclude) };
+            }
+        }
+        
         if (search) {
             query.$or = [
                 { title: { $regex: search, $options: 'i' } },
@@ -192,22 +200,27 @@ export const getAllBlogs = async (req, res) => {
 };
 
 /**
- * Get Single Blog Post
+ * Get Single Blog Post (by ID or slug)
  */
 export const getBlogById = async (req, res) => {
     try {
         const { blogId } = req.params;
 
-        if (!mongoose.Types.ObjectId.isValid(blogId)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid blog ID."
-            });
+        // Check if blogId is a valid ObjectId or a slug
+        const isObjectId = mongoose.Types.ObjectId.isValid(blogId);
+        
+        let blog;
+        if (isObjectId) {
+            // Find by ID
+            blog = await Blog.findById(blogId)
+                .populate("category", "name slug")
+                .populate("author", "name email avatar");
+        } else {
+            // Find by slug
+            blog = await Blog.findOne({ slug: blogId })
+                .populate("category", "name slug")
+                .populate("author", "name email avatar");
         }
-
-        const blog = await Blog.findById(blogId)
-            .populate("category", "name slug")
-            .populate("author", "name email avatar");
 
         if (!blog) {
             return res.status(404).json({
@@ -224,9 +237,11 @@ export const getBlogById = async (req, res) => {
             });
         }
 
-        // Increment views
-        blog.views += 1;
-        await blog.save({ validateBeforeSave: false });
+        // Increment views (only for published blogs viewed by non-admins)
+        if ((!req.user || req.user.role !== 'admin') && blog.status === 'published') {
+            blog.views += 1;
+            await blog.save({ validateBeforeSave: false });
+        }
 
         return res.status(200).json({
             success: true,

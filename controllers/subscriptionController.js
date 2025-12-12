@@ -1,8 +1,10 @@
 import User from '../models/userModel.js';
 import Logger from '../utils/logger.js';
+import SubscriptionPlan from '../models/subscriptionPlanModel.js';
+import Settings from '../models/settingsModel.js';
 
-// Subscription Plans Configuration
-export const SUBSCRIPTION_PLANS = {
+// Legacy hardcoded plans (fallback)
+const LEGACY_PLANS = {
     free: {
         name: "Free",
         price: 0,
@@ -62,17 +64,98 @@ export const SUBSCRIPTION_PLANS = {
     }
 };
 
+// Export for backward compatibility
+export const SUBSCRIPTION_PLANS = LEGACY_PLANS;
+
 /**
  * Get Available Subscription Plans
  */
 export const getSubscriptionPlans = async (req, res) => {
     try {
+        // Check if payment system is enabled
+        const paymentEnabled = await Settings.findOne({ key: 'paymentSystemEnabled' });
+        // Default to true if setting doesn't exist
+        const isPaymentEnabled = paymentEnabled === null ? true : (paymentEnabled.value !== false && paymentEnabled.value !== 'false');
+        
+        if (!isPaymentEnabled) {
+            return res.status(200).json({
+                success: true,
+                data: {},
+                paymentSystemEnabled: false
+            });
+        }
+
+        // Check additional settings
+        const showPlans = await Settings.findOne({ key: 'showSubscriptionPlans' });
+        const showPlansEnabled = showPlans === null ? true : (showPlans.value !== false && showPlans.value !== 'false');
+        
+        if (!showPlansEnabled) {
+            return res.status(200).json({
+                success: true,
+                data: {},
+                paymentSystemEnabled: true
+            });
+        }
+
+        // Get user role if authenticated
+        const userRole = req.user?.role || 'user';
+
+        // Try to get plans from database first (active and visible)
+        const dbPlans = await SubscriptionPlan.find({ 
+            isActive: true,
+            visible: { $ne: false } // visible is true or undefined
+        })
+            .sort({ order: 1 });
+
+        // Filter by role and user level
+        const filteredPlans = dbPlans.filter(plan => {
+            // Check role access
+            if (plan.allowedRoles && plan.allowedRoles.length > 0) {
+                if (!plan.allowedRoles.includes('all') && !plan.allowedRoles.includes(userRole)) {
+                    return false;
+                }
+            }
+            
+            // Check user level (if implemented)
+            if (plan.minUserLevel && plan.minUserLevel > 0) {
+                const userLevel = req.user?.level || 0;
+                if (userLevel < plan.minUserLevel) {
+                    return false;
+                }
+            }
+            
+            return true;
+        });
+
+        if (filteredPlans.length > 0) {
+            // Convert to object format
+            const plansObject = {};
+            filteredPlans.forEach(plan => {
+                plansObject[plan.name] = {
+                    name: plan.displayName,
+                    price: plan.price,
+                    duration: plan.duration,
+                    features: plan.features,
+                    maxListings: plan.maxListings,
+                    boostCredits: plan.boostCredits,
+                    requiresApproval: plan.requiresApproval || false
+                };
+            });
+            return res.status(200).json({
+                success: true,
+                data: plansObject,
+                paymentSystemEnabled: true
+            });
+        }
+
+        // Fallback to legacy plans (only if payment system is enabled)
         return res.status(200).json({
             success: true,
-            data: SUBSCRIPTION_PLANS
+            data: LEGACY_PLANS,
+            paymentSystemEnabled: true
         });
     } catch (error) {
-        Logger.error("Get Subscription Plans Error:", error);
+        Logger.error("Get Subscription Plans Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error fetching subscription plans"
@@ -87,12 +170,30 @@ export const getMySubscription = async (req, res) => {
     try {
         const user = await User.findById(req.user._id).select('subscription boostCredits');
         
+        // Get plan details from database or legacy
+        let planDetails = LEGACY_PLANS.free;
+        if (user.subscription && user.subscription.plan) {
+            const dbPlan = await SubscriptionPlan.findOne({ name: user.subscription.plan });
+            if (dbPlan) {
+                planDetails = {
+                    name: dbPlan.displayName,
+                    price: dbPlan.price,
+                    duration: dbPlan.duration,
+                    features: dbPlan.features,
+                    maxListings: dbPlan.maxListings,
+                    boostCredits: dbPlan.boostCredits
+                };
+            } else if (LEGACY_PLANS[user.subscription.plan]) {
+                planDetails = LEGACY_PLANS[user.subscription.plan];
+            }
+        }
+        
         return res.status(200).json({
             success: true,
             data: {
                 subscription: user.subscription,
                 boostCredits: user.boostCredits,
-                planDetails: SUBSCRIPTION_PLANS[user.subscription.plan] || SUBSCRIPTION_PLANS.free
+                planDetails: planDetails
             }
         });
     } catch (error) {
@@ -111,14 +212,35 @@ export const purchaseSubscription = async (req, res) => {
     try {
         const { plan, paymentMethod, transactionId, autoRenew } = req.body;
 
-        if (!plan || !SUBSCRIPTION_PLANS[plan]) {
+        // Check if payment system is enabled
+        const paymentEnabled = await Settings.findOne({ key: 'paymentSystemEnabled' });
+        if (paymentEnabled && paymentEnabled.value === false) {
+            return res.status(403).json({
+                success: false,
+                message: "Payment system is currently disabled"
+            });
+        }
+
+        // Try to get plan from database first
+        let selectedPlan = null;
+        const dbPlan = await SubscriptionPlan.findOne({ name: plan, isActive: true });
+        if (dbPlan) {
+            selectedPlan = {
+                name: dbPlan.displayName,
+                price: dbPlan.price,
+                duration: dbPlan.duration,
+                features: dbPlan.features,
+                maxListings: dbPlan.maxListings,
+                boostCredits: dbPlan.boostCredits
+            };
+        } else if (LEGACY_PLANS[plan]) {
+            selectedPlan = LEGACY_PLANS[plan];
+        } else {
             return res.status(400).json({
                 success: false,
                 message: "Invalid subscription plan"
             });
         }
-
-        const selectedPlan = SUBSCRIPTION_PLANS[plan];
         const user = await User.findById(req.user._id);
 
         // Check if user already has an active subscription
