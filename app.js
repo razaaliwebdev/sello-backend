@@ -72,7 +72,7 @@ app.use(compression());
 // CORS configuration - supports multiple origins from environment variable
 const allowedOrigins = process.env.CLIENT_URL
   ? process.env.CLIENT_URL.split(',').map(url => url.trim())
-  : ["https://sello.pk",http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4000", "http://localhost:5174"];
+  : ["https://sello.pk","http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4000", "http://localhost:5174"];
 
 // Add production URL if provided
 if (process.env.PRODUCTION_URL) {
@@ -194,5 +194,6 @@ app.use(validationErrorHandler);
 app.use(duplicateKeyErrorHandler);
 app.use(castErrorHandler);
 app.use(errorHandler);
+
 
 
