@@ -1,6 +1,7 @@
 import Review from "../models/reviewModel.js";
 import User from "../models/userModel.js";
 import mongoose from "mongoose";
+import Logger from "../utils/logger.js";
 
 // Add a Review
 export const addReview = async (req, res) => {
@@ -56,7 +57,7 @@ export const addReview = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Add Review Error:", error);
+        Logger.error("Add Review Error", error, { reviewerId, targetUserId });
         return res.status(500).json({ message: "Server error adding review" });
     }
 };
@@ -80,7 +81,7 @@ export const getUserReviews = async (req, res) => {
             data: reviews
         });
     } catch (error) {
-        console.error("Get Reviews Error:", error);
+        Logger.error("Get Reviews Error", error, { userId: req.params.userId });
         return res.status(500).json({ message: "Server error fetching reviews" });
     }
 };
@@ -155,7 +156,7 @@ export const moderateReview = async (req, res) => {
             data: review
         });
     } catch (error) {
-        console.error("Moderate Review Error:", error);
+        Logger.error("Moderate Review Error", error, { reviewId, userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error moderating review."
@@ -212,7 +213,7 @@ export const reportReview = async (req, res) => {
             message: "Review reported successfully. Admin will review it."
         });
     } catch (error) {
-        console.error("Report Review Error:", error);
+        Logger.error("Report Review Error", error, { reviewId, userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error reporting review."
@@ -271,7 +272,7 @@ export const getAllReviews = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get All Reviews Error:", error);
+        Logger.error("Get All Reviews Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error fetching reviews."

@@ -34,6 +34,30 @@ if (process.env.ENABLE_CRON_JOBS === 'true') {
             }
         });
 
+        // Run saved search alerts every hour
+        cron.default.schedule('0 * * * *', async () => {
+            Logger.info('Running saved search alerts job...');
+            try {
+                const { sendSavedSearchAlerts } = await import('./controllers/savedSearchController.js');
+                await sendSavedSearchAlerts();
+            } catch (error) {
+                Logger.error('Saved search alerts cron job failed', error);
+            }
+        });
+
+        // Run listing expiry job daily at 2 AM
+        cron.default.schedule('0 2 * * *', async () => {
+            Logger.info('Running listing expiry job...');
+            try {
+                // Import and run the expiry script
+                const { runExpireListings } = await import('./scripts/expireOldListings.js');
+                // Note: The script handles its own DB connection and closes it
+                await runExpireListings();
+            } catch (error) {
+                Logger.error('Listing expiry cron job failed', error);
+            }
+        });
+
         Logger.info('Cron jobs initialized');
     } catch (error) {
         Logger.warn('node-cron not installed. Background jobs disabled. Install with: npm install node-cron', { error: error.message });

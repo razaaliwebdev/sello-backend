@@ -1,4 +1,5 @@
 import User from '../models/userModel.js';
+import Category from '../models/categoryModel.js';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
@@ -7,6 +8,13 @@ import { generateOtp } from '../utils/generateOtp.js';
 import sendEmail from '../utils/sendEmail.js';
 import client from '../config/googleClient.js';
 import { uploadCloudinary } from '../utils/cloudinary.js';
+import Logger from '../utils/logger.js';
+import { 
+    generateVerificationCode, 
+    sendVerificationCode, 
+    verifyCode, 
+    createExpiryDate 
+} from '../utils/phoneVerification.js';
 
 /**
  * Generate JWT Token
@@ -40,6 +48,22 @@ const isValidPassword = (password) => {
  */
 export const register = async (req, res) => {
     try {
+        // Check if registration is allowed
+        const Settings = (await import('../models/settingsModel.js')).default;
+        const allowRegistrationSetting = await Settings.findOne({ key: 'allowRegistration' });
+        const allowRegistration = allowRegistrationSetting === null || 
+            allowRegistrationSetting.value === true || 
+            allowRegistrationSetting.value === 'true' || 
+            allowRegistrationSetting.value === 1 || 
+            allowRegistrationSetting.value === '1';
+
+        if (!allowRegistration) {
+            return res.status(403).json({
+                success: false,
+                message: "Registration is currently disabled. Please contact support for assistance."
+            });
+        }
+
         const {
             name,
             email,
@@ -49,6 +73,8 @@ export const register = async (req, res) => {
             dealerName,
             mobileNumber,
             whatsappNumber,
+            country,
+            state,
             city,
             area,
             vehicleTypes
@@ -142,6 +168,66 @@ export const register = async (req, res) => {
                 services
             } = req.body;
 
+            // Look up location category names from IDs
+            let countryName = null;
+            let stateName = null;
+            let cityName = null;
+            
+            if (country && mongoose.Types.ObjectId.isValid(country)) {
+                const countryCategory = await Category.findById(country);
+                if (countryCategory && countryCategory.subType === 'country') {
+                    countryName = countryCategory.name;
+                }
+            }
+            
+            if (state && mongoose.Types.ObjectId.isValid(state)) {
+                const stateCategory = await Category.findById(state);
+                if (stateCategory && stateCategory.subType === 'state') {
+                    stateName = stateCategory.name;
+                }
+            }
+            
+            if (city && mongoose.Types.ObjectId.isValid(city)) {
+                const cityCategory = await Category.findById(city);
+                if (cityCategory && cityCategory.subType === 'city') {
+                    cityName = cityCategory.name;
+                }
+            }
+
+            // Build location string
+            const locationParts = [];
+            if (area) locationParts.push(area);
+            if (cityName) locationParts.push(cityName);
+            if (stateName) locationParts.push(stateName);
+            if (countryName) locationParts.push(countryName);
+            const fullLocation = locationParts.join(', ');
+
+            // Validate and format social media URLs
+            const validateUrl = (url, platform) => {
+                if (!url || !url.trim()) return null;
+                let urlStr = url.trim();
+                // Add https:// if no protocol
+                if (!urlStr.match(/^https?:\/\//i)) {
+                    urlStr = `https://${urlStr}`;
+                }
+                // Basic URL validation
+                try {
+                    new URL(urlStr);
+                    return urlStr;
+                } catch (e) {
+                    console.warn(`Invalid ${platform} URL: ${urlStr}`);
+                    return null;
+                }
+            };
+
+            // Check if auto-approve dealers is enabled
+            const autoApproveDealersSetting = await Settings.findOne({ key: 'autoApproveDealers' });
+            const autoApproveDealers = autoApproveDealersSetting && 
+                (autoApproveDealersSetting.value === true || 
+                 autoApproveDealersSetting.value === 'true' || 
+                 autoApproveDealersSetting.value === 1 || 
+                 autoApproveDealersSetting.value === '1');
+
             // Parse JSON strings if they exist
             let parsedSpecialties = [];
             let parsedLanguages = [];
@@ -207,22 +293,28 @@ export const register = async (req, res) => {
             userData.dealerInfo = {
                 businessName: dealerName || name,
                 businessLicense: cnicUrl || null,
-                businessAddress: area ? `${area}, ${city}` : null,
+                businessAddress: fullLocation || null,
                 businessPhone: mobileNumber || null,
                 whatsappNumber: whatsappNumber || null,
+                // Store both IDs and names for location
+                country: country || null,
+                countryName: countryName || null,
+                state: state || null,
+                stateName: stateName || null,
                 city: city || null,
+                cityName: cityName || null,
                 area: area || null,
                 vehicleTypes: vehicleTypes || null,
-                verified: false,
-                verifiedAt: null,
+                verified: autoApproveDealers, // Auto-approve if setting is enabled
+                verifiedAt: autoApproveDealers ? new Date() : null,
                 // Enhanced fields
                 description: description || null,
-                website: website || null,
+                website: validateUrl(website, 'website'),
                 socialMedia: {
-                    facebook: facebook || null,
-                    instagram: instagram || null,
-                    twitter: twitter || null,
-                    linkedin: linkedin || null
+                    facebook: validateUrl(facebook, 'facebook'),
+                    instagram: validateUrl(instagram, 'instagram'),
+                    twitter: validateUrl(twitter, 'twitter'),
+                    linkedin: validateUrl(linkedin, 'linkedin')
                 },
                 establishedYear: establishedYear ? parseInt(establishedYear) : null,
                 employeeCount: employeeCount || null,
@@ -278,7 +370,7 @@ export const register = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Register Error:", error.message);
+        Logger.error("Register Error", error, { email: req.body?.email });
 
         // Handle duplicate email error
         if (error.code === 11000) {
@@ -344,6 +436,24 @@ export const login = async (req, res) => {
             });
         }
 
+        // Check if email verification is required
+        const Settings = (await import('../models/settingsModel.js')).default;
+        const requireEmailVerificationSetting = await Settings.findOne({ key: 'requireEmailVerification' });
+        const requireEmailVerification = requireEmailVerificationSetting && 
+            (requireEmailVerificationSetting.value === true || 
+             requireEmailVerificationSetting.value === 'true' || 
+             requireEmailVerificationSetting.value === 1 || 
+             requireEmailVerificationSetting.value === '1');
+
+        // If email verification is required and user hasn't verified, block login
+        if (requireEmailVerification && !user.isEmailVerified && user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: "Please verify your email address before logging in. Check your inbox for the verification email.",
+                requiresEmailVerification: true
+            });
+        }
+
         // Update last login
         user.lastLogin = new Date();
         await user.save({ validateBeforeSave: false });
@@ -383,7 +493,7 @@ export const login = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Login Error:", error.message);
+        Logger.error("Login Error", error, { email: req.body?.email });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -489,27 +599,20 @@ export const forgotPassword = async (req, res) => {
             // If email wasn't actually sent (dev mode), log it but still return success
             const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
             if (emailResult?.messageId === 'dev-mode') {
-                console.log(`\n✅ OTP saved for user ${user.email}. OTP: ${otp}`);
-                console.log(`⚠️  Development mode - Email not sent. Check console for OTP.\n`);
+                // OTP saved, email not sent in dev mode
             }
         } catch (emailError) {
-            console.error("❌ Email sending error:", emailError.message);
-            console.error("Full error details:", emailError);
-            console.error("Stack trace:", emailError.stack);
+            Logger.error("Email sending error", emailError, { email: user.email });
 
             // Check if SMTP is not configured
             const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
             const isMissingSMTP = emailError.message.includes("Email configuration is missing");
 
-            // If SMTP is missing and we're in development, log OTP and still return success
+            // If SMTP is missing and we're in development, still return success
             if (isMissingSMTP && isDevelopment) {
-                console.log(`\n⚠️  SMTP not configured. OTP for ${user.email}: ${otp}\n`);
-                // Continue - don't return error, just log it
+                // Continue - don't return error
             } else if (isMissingSMTP) {
-                // Production mode but SMTP not configured - log OTP to console and return success
-                console.log(`\n⚠️  SMTP not configured in production. OTP for ${user.email}: ${otp}`);
-                console.log(`⚠️  Please configure SMTP settings to enable email delivery.\n`);
-                // Still return success since OTP is saved in DB
+                // Production mode but SMTP not configured - still return success since OTP is saved in DB
             } else {
                 // Other email errors - clear OTP and return error
                 user.otp = null;
@@ -538,7 +641,7 @@ export const forgotPassword = async (req, res) => {
             message: "If an account exists with this email, an OTP has been sent."
         });
     } catch (error) {
-        console.error("Forgot Password Error:", error.message);
+        Logger.error("Forgot Password Error", error, { email: req.body?.email });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -603,7 +706,7 @@ export const verifyOtp = async (req, res) => {
             message: "OTP verified successfully. You can now reset your password."
         });
     } catch (error) {
-        console.error("Verify OTP Error:", error.message);
+        Logger.error("Verify OTP Error", error, { email: req.headers?.email });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -671,7 +774,7 @@ export const resetPassword = async (req, res) => {
             message: "Password updated successfully."
         });
     } catch (error) {
-        console.error("Reset Password Error:", error.message);
+        Logger.error("Reset Password Error", error, { email: req.headers?.email });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -698,7 +801,7 @@ export const googleLogin = async (req, res) => {
         const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
 
         if (!googleClientId) {
-            console.error("GOOGLE_CLIENT_ID is not configured in environment variables");
+            Logger.error("GOOGLE_CLIENT_ID not configured", { error: "Missing environment variable" });
             return res.status(500).json({
                 success: false,
                 message: "Google authentication is not configured. Please contact support.",
@@ -718,10 +821,8 @@ export const googleLogin = async (req, res) => {
                 audience: googleClientId,
             });
         } catch (verifyError) {
-            console.error("Google token verification error:", verifyError.message);
             const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
-            console.error("Error details:", {
-                message: verifyError.message,
+            Logger.error("Google token verification error", verifyError, {
                 code: verifyError.code,
                 clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Using fallback",
                 expectedAudience: googleClientId
@@ -737,7 +838,7 @@ export const googleLogin = async (req, res) => {
                 errorMessage = "Token signature is invalid. Please try logging in again.";
             } else if (verifyError.message?.includes("Invalid audience")) {
                 errorMessage = "Google OAuth configuration mismatch. Please contact support.";
-                console.error("Client ID mismatch - Frontend and backend must use the same Google Client ID");
+                Logger.error("Google Client ID mismatch", { error: "Frontend and backend must use the same Google Client ID" });
             } else if (verifyError.message?.includes("Token expired")) {
                 errorMessage = "Login session expired. Please try logging in again.";
             }
@@ -789,7 +890,7 @@ export const googleLogin = async (req, res) => {
                     lastLogin: new Date()
                 });
             } catch (createError) {
-                console.error("Error creating user from Google:", createError);
+                Logger.error("Error creating user from Google", createError);
                 // If user creation fails, check if it's a duplicate email error
                 if (createError.code === 11000 || createError.message?.includes('duplicate')) {
                     // User might have been created between check and create
@@ -858,8 +959,7 @@ export const googleLogin = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Google Login Error:", error.message);
-        console.error("Error details:", error);
+        Logger.error("Google Login Error", error);
 
         // Provide more specific error messages
         let errorMessage = "Google login failed. Please try again.";
@@ -911,10 +1011,145 @@ export const logout = async (req, res) => {
             message: "User logged out successfully."
         });
     } catch (error) {
-        console.error("Logout Error:", error.message);
+        Logger.error("Logout Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Failed to log out.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Send Phone Verification Code
+ */
+export const sendPhoneVerification = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Unauthorized: User not authenticated'
+            });
+        }
+
+        const { phoneNumber } = req.body;
+
+        if (!phoneNumber) {
+            return res.status(400).json({
+                success: false,
+                message: 'Phone number is required'
+            });
+        }
+
+        // Validate phone number format (basic validation)
+        if (!/^\+?\d{9,15}$/.test(phoneNumber.trim())) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid phone number format. Must be 9-15 digits.'
+            });
+        }
+
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Generate verification code
+        const code = generateVerificationCode();
+        const expiry = createExpiryDate();
+
+        // Save code to user
+        user.phone = phoneNumber.trim();
+        user.phoneVerificationCode = code;
+        user.phoneVerificationExpiry = expiry;
+        user.phoneVerified = false; // Reset verified status when new code is sent
+        await user.save();
+
+        // Send SMS
+        await sendVerificationCode(phoneNumber.trim(), code);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Verification code sent successfully. Please check your phone.'
+        });
+    } catch (error) {
+        Logger.error("Send Phone Verification Error", error, { userId: req.user?._id });
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to send verification code',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Verify Phone Number
+ */
+export const verifyPhone = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Unauthorized: User not authenticated'
+            });
+        }
+
+        const { code } = req.body;
+
+        if (!code) {
+            return res.status(400).json({
+                success: false,
+                message: 'Verification code is required'
+            });
+        }
+
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        if (!user.phoneVerificationCode || !user.phoneVerificationExpiry) {
+            return res.status(400).json({
+                success: false,
+                message: 'No verification code found. Please request a new code.'
+            });
+        }
+
+        // Verify code
+        const isValid = verifyCode(user.phoneVerificationCode, code, user.phoneVerificationExpiry);
+
+        if (!isValid) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired verification code. Please request a new code.'
+            });
+        }
+
+        // Mark phone as verified and clear code
+        user.phoneVerified = true;
+        user.phoneVerificationCode = null;
+        user.phoneVerificationExpiry = null;
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Phone number verified successfully',
+            data: {
+                phone: user.phone,
+                phoneVerified: user.phoneVerified
+            }
+        });
+    } catch (error) {
+        Logger.error("Verify Phone Error", error, { userId: req.user?._id });
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to verify phone number',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

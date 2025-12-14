@@ -11,7 +11,8 @@ import { isValidObjectId } from './sanitizeMiddleware.js';
  */
 const requestCounts = new Map();
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
-const RATE_LIMIT_MAX = 100; // Max requests per window
+// Different limits for different environments
+const RATE_LIMIT_MAX = process.env.NODE_ENV === 'production' ? 100 : 500; // Production: 100, Development: 500 requests per window
 
 export const rateLimit = (req, res, next) => {
     const key = req.ip || req.connection.remoteAddress;

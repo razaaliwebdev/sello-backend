@@ -147,7 +147,6 @@ export const initializeRoles = async () => {
             const existingRole = await Role.findOne({ name: preset.name });
             if (!existingRole) {
                 await Role.create(preset);
-                console.log(`✓ Initialized role: ${preset.name}`);
             }
         }
     } catch (error) {
@@ -168,7 +167,9 @@ export const getAllRoles = async (req, res) => {
             });
         }
 
-        const roles = await Role.find({ isActive: true }).sort({ name: 1 });
+        // Get all roles (include inactive ones too, but prefer active)
+        // This ensures all roles are available for selection
+        const roles = await Role.find({}).sort({ name: 1 });
 
         return res.status(200).json({
             success: true,
@@ -425,11 +426,25 @@ export const inviteUser = async (req, res) => {
             });
         }
 
-        // Log the invite
-        await createAuditLog(req.user, "user_invited", {
-            targetEmail: email,
-            role: role
-        }, null, req);
+        // Validate email format
+        const emailRegex = /^\S+@\S+\.\S+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: "Please provide a valid email address."
+            });
+        }
+
+        // Log the invite (non-blocking - don't fail if audit log fails)
+        try {
+            await createAuditLog(req.user, "user_invited", {
+                targetEmail: email,
+                role: role
+            }, null, req);
+        } catch (auditError) {
+            console.error("Audit log error (non-blocking):", auditError.message);
+            // Continue with invite creation even if audit log fails
+        }
 
         // Check if user already exists
         const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -452,19 +467,66 @@ export const inviteUser = async (req, res) => {
             });
         }
 
-        // Get role permissions if roleId provided
+        // Get role data and permissions
+        let roleData = null;
         let rolePermissions = permissions || {};
-        if (roleId && !permissions) {
-            const roleData = await Role.findById(roleId);
-            if (roleData) {
-                rolePermissions = roleData.permissions;
+        let finalRole = role;
+        
+        // If roleId is provided, fetch the role from database
+        if (roleId) {
+            try {
+                roleData = await Role.findById(roleId);
+                if (roleData) {
+                    rolePermissions = roleData.permissions || {};
+                    // Use the role's displayName or name for the invite
+                    finalRole = roleData.displayName || roleData.name || role;
+                }
+            } catch (roleError) {
+                console.error("Error fetching role:", roleError.message);
+                // Continue with provided role
             }
-        } else if (role !== "Custom" && !permissions) {
-            // Use preset permissions
-            const preset = ROLE_PRESETS[role];
-            if (preset) {
-                rolePermissions = preset.permissions;
+        }
+        
+        // If no roleId but role name provided, try to find role by name
+        if (!roleData && role && role !== "Custom") {
+            try {
+                roleData = await Role.findOne({ 
+                    $or: [
+                        { name: role },
+                        { displayName: role }
+                    ]
+                });
+                if (roleData) {
+                    rolePermissions = roleData.permissions || {};
+                    finalRole = roleData.displayName || roleData.name || role;
+                    // Update roleId if found
+                    if (!roleId) {
+                        roleId = roleData._id;
+                    }
+                } else {
+                    // Use preset permissions if role not found in DB
+                    const preset = ROLE_PRESETS[role];
+                    if (preset) {
+                        rolePermissions = preset.permissions;
+                    }
+                }
+            } catch (roleError) {
+                console.error("Error finding role:", roleError.message);
+                // Use preset permissions as fallback
+                const preset = ROLE_PRESETS[role];
+                if (preset) {
+                    rolePermissions = preset.permissions;
+                }
             }
+        }
+
+        // Validate role against invite model enum
+        const validRoles = ["Super Admin", "Marketing Team", "Support Agent", "Blogs/Content Agent", "Custom"];
+        if (!validRoles.includes(finalRole)) {
+            // If role doesn't match enum, use "Custom" and store the actual role name in permissions
+            console.warn(`Role "${finalRole}" not in invite enum, using "Custom"`);
+            rolePermissions.originalRoleName = finalRole;
+            finalRole = "Custom";
         }
 
         // Generate token
@@ -472,20 +534,43 @@ export const inviteUser = async (req, res) => {
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + (expirationDays || 7));
 
-        const invite = await Invite.create({
-            email: email.toLowerCase(),
-            fullName,
-            phone,
-            role,
-            roleId: roleId || null,
-            permissions: rolePermissions,
-            token,
-            expiresAt,
-            invitedBy: req.user._id
-        });
+        // Create invite
+        let invite;
+        try {
+            invite = await Invite.create({
+                email: email.toLowerCase(),
+                fullName,
+                phone: phone || null, // Phone is optional
+                role: finalRole,
+                roleId: roleId || null,
+                permissions: rolePermissions,
+                token,
+                expiresAt,
+                invitedBy: req.user._id
+            });
+        } catch (inviteError) {
+            
+            // If it's a validation error, provide better message
+            if (inviteError.name === 'ValidationError') {
+                const errors = Object.values(inviteError.errors).map(e => e.message).join(', ');
+                return res.status(400).json({
+                    success: false,
+                    message: `Validation error: ${errors}`,
+                    error: process.env.NODE_ENV === 'development' ? {
+                        message: inviteError.message,
+                        errors: Object.keys(inviteError.errors)
+                    } : undefined
+                });
+            }
+            throw inviteError; // Re-throw if it's not a validation error
+        }
 
         // Send invite email
-        const inviteUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/accept-invite/${token}`;
+        // Use FRONTEND_URL from env, or construct from request origin, or default to localhost
+        const frontendUrl = process.env.FRONTEND_URL || 
+                           (req.headers.origin ? new URL(req.headers.origin).origin : null) ||
+                           "http://localhost:5173";
+        const inviteUrl = `${frontendUrl}/accept-invite/${token}`;
         const siteName = process.env.SITE_NAME || "Sello";
         const emailHtml = `
             <!DOCTYPE html>
@@ -505,6 +590,10 @@ export const inviteUser = async (req, res) => {
                     <div style="text-align: center; margin: 30px 0;">
                         <a href="${inviteUrl}" style="background-color: #4F46E5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">Accept Invitation</a>
                     </div>
+                    <p style="color: #666; font-size: 14px; margin-top: 20px;">
+                        <strong>Or copy this link:</strong><br>
+                        <a href="${inviteUrl}" style="color: #4F46E5; word-break: break-all;">${inviteUrl}</a>
+                    </p>
                     <p style="color: #666; font-size: 14px; margin-bottom: 0;">
                         <strong>Important:</strong> This invitation will expire on <strong>${expiresAt.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>.
                     </p>
@@ -517,40 +606,85 @@ export const inviteUser = async (req, res) => {
             </html>
         `;
 
-        // Send email - ensure it's sent before returning success
+        // Send email (non-blocking - invite is created regardless)
+        let emailSent = false;
+        let emailError = null;
+        let actualEmailSent = false; // Track if email was actually sent (not just dev mode)
+        
         try {
-            await sendEmail(email, `Invitation to join ${siteName} Admin Panel`, emailHtml);
-            console.log(`✓ Invitation email sent successfully to ${email}`);
-        } catch (emailError) {
-            console.error("❌ Send Invite Email Error:", emailError.message);
-            // Still return success but log the error
-            // The invite is created, email failure shouldn't block the process
-            // But we should notify about email failure
-            return res.status(201).json({
-                success: true,
-                message: "Invitation created successfully, but email could not be sent. Please check email configuration.",
-                warning: "Email sending failed: " + emailError.message,
-                data: invite
-            });
+            const emailResult = await sendEmail(email, `Invitation to join ${siteName} Admin Panel`, emailHtml);
+            
+            // Check if email was actually sent (not just dev mode simulation)
+            if (emailResult && emailResult.actuallySent !== false && emailResult.messageId && emailResult.messageId !== 'dev-mode') {
+                emailSent = true;
+                actualEmailSent = true;
+            } else {
+                // Email was not actually sent (dev mode or other issue)
+                emailError = "SMTP not configured. Email was not sent. Please share the invite URL manually.";
+                emailSent = false;
+            }
+        } catch (emailErr) {
+            emailError = emailErr.message;
+            emailSent = false;
+            // Continue - invite is created, email failure shouldn't block the process
         }
 
-        await createAuditLog(req.user, "user_invited", {
-            inviteId: invite._id,
-            email: invite.email,
-            role: invite.role
-        }, null, req);
+        // Log successful invite creation (non-blocking)
+        try {
+            await createAuditLog(req.user, "user_invited", {
+                inviteId: invite._id,
+                email: invite.email,
+                role: invite.role,
+                emailSent: emailSent
+            }, null, req);
+        } catch (auditError) {
+            console.error("Audit log error (non-blocking):", auditError.message);
+        }
 
-        return res.status(201).json({
+        // Always include invite URL in response for manual sharing if needed
+        const responseData = {
             success: true,
-            message: "Invitation sent successfully.",
-            data: invite
-        });
+            message: emailSent && actualEmailSent 
+                ? "Invitation sent successfully via email." 
+                : "Invitation created successfully, but email was not sent.",
+            data: invite,
+            inviteUrl: inviteUrl, // Always include invite URL
+            emailSent: emailSent && actualEmailSent
+        };
+        
+        // Add warning if email was not sent
+        if (!emailSent || !actualEmailSent) {
+            responseData.warning = emailError || "SMTP is not configured. Please share the invite URL manually or configure SMTP settings.";
+        }
+        
+        return res.status(201).json(responseData);
     } catch (error) {
         console.error("Invite User Error:", error.message);
-        return res.status(500).json({
+        console.error("Error stack:", error.stack);
+        
+        // Provide more specific error messages
+        let errorMessage = "Server error. Please try again later.";
+        let statusCode = 500;
+        
+        if (error.name === 'ValidationError') {
+            statusCode = 400;
+            const errors = Object.values(error.errors).map(e => e.message).join(', ');
+            errorMessage = `Validation error: ${errors}`;
+        } else if (error.name === 'MongoServerError' && error.code === 11000) {
+            statusCode = 409;
+            errorMessage = "An invite with this email already exists.";
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        return res.status(statusCode).json({
             success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: errorMessage,
+            error: process.env.NODE_ENV === 'development' ? {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
+            } : undefined
         });
     }
 };
@@ -567,7 +701,10 @@ export const getAllInvites = async (req, res) => {
             });
         }
 
+        // Get invites with token included (needed for generating invite URLs)
+        // Token is not excluded by default, but we explicitly select it to ensure it's included
         const invites = await Invite.find()
+            .select('email fullName phone role roleId permissions token expiresAt status invitedBy acceptedBy acceptedAt createdAt updatedAt')
             .populate('invitedBy', 'name email')
             .populate('acceptedBy', 'name email')
             .sort({ createdAt: -1 });

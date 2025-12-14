@@ -16,6 +16,7 @@ export const createCategory = async (req, res) => {
 
         const { name, description, image, type, subType, parentCategory, order, isActive } = req.body;
 
+
         if (!name || !type) {
             return res.status(400).json({
                 success: false,
@@ -53,6 +54,21 @@ export const createCategory = async (req, res) => {
             });
         }
 
+        // Cities and states require a parentCategory
+        if (type === 'location' && (subType === 'city' || subType === 'state') && !parentCategory) {
+            if (subType === 'city') {
+                return res.status(400).json({
+                    success: false,
+                    message: "City categories must have a state category as parent."
+                });
+            } else if (subType === 'state') {
+                return res.status(400).json({
+                    success: false,
+                    message: "State categories must have a country category as parent."
+                });
+            }
+        }
+
         // Validate parentCategory if provided
         if (parentCategory) {
             if (!mongoose.Types.ObjectId.isValid(parentCategory)) {
@@ -68,19 +84,50 @@ export const createCategory = async (req, res) => {
                     message: "Parent category not found."
                 });
             }
-            // Models must have a make as parent
-            if (subType === 'model' && parent.subType !== 'make') {
+            
+            // Ensure parent is a location type category
+            if (type === 'location' && parent.type !== 'location') {
                 return res.status(400).json({
                     success: false,
-                    message: "Model categories must have a make category as parent."
+                    message: `Parent category must be a location type category. Received type: "${parent.type}"`
                 });
             }
-            // Cities (and states) must have a country as parent
-            if (['city', 'state'].includes(subType) && parent.subType !== 'country') {
-                return res.status(400).json({
-                    success: false,
-                    message: "City and state categories must have a country category as parent."
-                });
+            
+            // IMPORTANT: Cities depend ONLY on State, NOT on Country
+            // Cities must have a state as parent (not country)
+            // This validation MUST come FIRST and we skip all other validations for cities
+            if (subType === 'city') {
+                if (parent.subType !== 'state') {
+                    if (parent.subType === 'country') {
+                        return res.status(400).json({
+                            success: false,
+                            message: "City categories must have a state category as parent, not a country. Please select a state."
+                        });
+                    }
+                    return res.status(400).json({
+                        success: false,
+                        message: `City categories must have a state category as parent. Received parent type: "${parent.subType}"`
+                    });
+                }
+                // CRITICAL: For cities, we ONLY check that parent is a state. 
+                // We do NOT check if the state has a country parent - that's not our concern.
+                // Skip all other validations for cities.
+            } else if (subType === 'state') {
+                // States must have a country as parent
+                if (parent.subType !== 'country') {
+                    return res.status(400).json({
+                        success: false,
+                        message: "State categories must have a country category as parent."
+                    });
+                }
+            } else if (subType === 'model') {
+                // Models must have a make as parent
+                if (parent.subType !== 'make') {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Model categories must have a make category as parent."
+                    });
+                }
             }
         }
 
@@ -288,17 +335,43 @@ export const updateCategory = async (req, res) => {
                         message: "Parent category not found."
                     });
                 }
-                if (category.type === 'car' && category.subType === 'model' && parent.subType !== 'make') {
-                    return res.status(400).json({
-                        success: false,
-                        message: "Model categories must have a make category as parent."
-                    });
-                }
-                if (category.type === 'location' && ['city', 'state'].includes(category.subType) && parent.subType !== 'country') {
-                    return res.status(400).json({
-                        success: false,
-                        message: "City and state categories must have a country category as parent."
-                    });
+                
+                // Use the updated subType if it was provided, otherwise use the existing one
+                const currentSubType = subType !== undefined ? subType : category.subType;
+                
+                // IMPORTANT: Cities depend ONLY on State, NOT on Country
+                // Cities must have a state as parent (not country)
+                // This validation MUST come FIRST and use else-if to prevent any confusion
+                if (category.type === 'location' && currentSubType === 'city') {
+                    if (parent.subType !== 'state') {
+                        if (parent.subType === 'country') {
+                            return res.status(400).json({
+                                success: false,
+                                message: "City categories must have a state category as parent, not a country. Please select a state."
+                            });
+                        }
+                        return res.status(400).json({
+                            success: false,
+                            message: `City categories must have a state category as parent. Received parent type: "${parent.subType}"`
+                        });
+                    }
+                    // City validation passed, no need to check anything else
+                } else if (category.type === 'location' && currentSubType === 'state') {
+                    // States must have a country as parent
+                    if (parent.subType !== 'country') {
+                        return res.status(400).json({
+                            success: false,
+                            message: "State categories must have a country category as parent."
+                        });
+                    }
+                } else if (category.type === 'car' && currentSubType === 'model') {
+                    // Models must have a make as parent
+                    if (parent.subType !== 'make') {
+                        return res.status(400).json({
+                            success: false,
+                            message: "Model categories must have a make category as parent."
+                        });
+                    }
                 }
             }
 

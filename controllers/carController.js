@@ -7,6 +7,7 @@ import { parseArray, buildCarQuery } from '../utils/parseArray.js';
 import Logger from '../utils/logger.js';
 import { AppError, asyncHandler } from '../middlewares/errorHandler.js';
 import { validateRequiredFields } from '../utils/vehicleFieldConfig.js';
+import { getPriceAnalysis } from '../utils/priceAnalysis.js';
 
 
 
@@ -72,7 +73,17 @@ export const createCar = async (req, res) => {
             regionalSpec, bodyType, city, location, sellerType, carDoors, contactNumber,
             geoLocation, horsepower, warranty, numberOfCylinders, ownerType, vehicleType, vehicleTypeCategory,
             batteryRange, motorPower,
+            // Note: 'country' field is sent from frontend but not stored in Car model (city provides location context)
         } = req.body;
+
+        // Normalize make/model early for duplicate checking
+        const normalizeString = (str) => {
+            if (!str || typeof str !== 'string') return str;
+            return str.trim()
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+        };
 
         // Validate and set vehicleType first (needed for dynamic validation)
         const validVehicleTypes = ["Car", "Bus", "Truck", "Van", "Bike", "E-bike"];
@@ -119,6 +130,27 @@ export const createCar = async (req, res) => {
             });
         }
 
+        // Validate and prepare mileage tracking
+        const mileageNum = parseInt(mileage, 10) || 0;
+        if (mileageNum < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Mileage cannot be negative.',
+            });
+        }
+
+        // Create initial mileage history entry
+        const mileageHistoryEntry = {
+            mileage: mileageNum,
+            recordedAt: new Date(),
+            recordedBy: req.user._id,
+            source: 'listing'
+        };
+
+        // Flag suspicious mileage (e.g., very low for old car)
+        const carAge = currentYear - yearNum;
+        const suspiciousMileage = carAge > 5 && mileageNum < 10000;
+
         // Validate images are provided
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({
@@ -135,28 +167,83 @@ export const createCar = async (req, res) => {
             });
         }
 
-        // Parse geoLocation
-        let parsedGeoLocation;
-        try {
-            parsedGeoLocation = JSON.parse(geoLocation);
-            if (
-                !Array.isArray(parsedGeoLocation) ||
-                parsedGeoLocation.length !== 2 ||
-                typeof parsedGeoLocation[0] !== 'number' ||
-                typeof parsedGeoLocation[1] !== 'number' ||
-                parsedGeoLocation[0] === 0 ||
-                parsedGeoLocation[1] === 0
-            ) {
-                return res.status(400).json({
+        // Parse geoLocation (optional field - use default if not provided)
+        let parsedGeoLocation = null;
+        if (geoLocation) {
+            try {
+                parsedGeoLocation = JSON.parse(geoLocation);
+                if (
+                    !Array.isArray(parsedGeoLocation) ||
+                    parsedGeoLocation.length !== 2 ||
+                    typeof parsedGeoLocation[0] !== 'number' ||
+                    typeof parsedGeoLocation[1] !== 'number' ||
+                    parsedGeoLocation[0] === 0 ||
+                    parsedGeoLocation[1] === 0
+                ) {
+                    // Invalid format, but don't fail - just set to null (optional field)
+                    parsedGeoLocation = null;
+                    Logger.warn("Invalid geoLocation format, using default", { geoLocation, userId: req.user?._id });
+                }
+            } catch (error) {
+                // Invalid JSON, but don't fail - just set to null (optional field)
+                parsedGeoLocation = null;
+                Logger.warn("Failed to parse geoLocation, using default", { geoLocation, error: error.message, userId: req.user?._id });
+            }
+        }
+        
+        // Use default location (Dubai, UAE) if geoLocation is not provided
+        if (!parsedGeoLocation) {
+            parsedGeoLocation = [55.2708, 25.2048]; // [longitude, latitude] for Dubai, UAE
+        }
+
+        // Check for potential duplicate listings (unless force=true)
+        if (req.query.force !== 'true') {
+            const normalizedMake = normalizeString(make);
+            const normalizedModel = normalizeString(model);
+            const priceNum = parseFloat(price);
+            
+            const similarListings = await Car.find({
+                make: normalizedMake,
+                model: normalizedModel,
+                year: yearNum,
+                postedBy: req.user._id,
+                status: { $ne: 'deleted' },
+                // Price within 10% (to account for negotiation)
+                price: {
+                    $gte: priceNum * 0.90,
+                    $lte: priceNum * 1.10
+                }
+            }).limit(5);
+
+            // If similar listing exists and was created recently (within 30 days), warn user
+            const recentDuplicates = similarListings.filter(car => {
+                const daysSinceCreated = (new Date() - new Date(car.createdAt)) / (1000 * 60 * 60 * 24);
+                return daysSinceCreated < 30;
+            });
+
+            if (recentDuplicates.length > 0) {
+                Logger.warn('Potential duplicate listing detected', {
+                    userId: req.user._id,
+                    make: normalizedMake,
+                    model: normalizedModel,
+                    year: yearNum,
+                    similarCount: recentDuplicates.length
+                });
+                
+                // Return warning but allow override with force flag
+                return res.status(409).json({
                     success: false,
-                    message: 'Invalid geoLocation format. Use [longitude, latitude] with non-zero values.',
+                    message: 'A similar listing already exists. If this is a different vehicle, add ?force=true to proceed.',
+                    duplicateWarning: true,
+                    similarListings: recentDuplicates.map(car => ({
+                        _id: car._id,
+                        title: car.title,
+                        price: car.price,
+                        createdAt: car.createdAt,
+                        status: car.status
+                    }))
                 });
             }
-        } catch {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid geoLocation format. Must be a valid JSON array [longitude, latitude].',
-            });
         }
 
         // Parse features
@@ -180,6 +267,44 @@ export const createCar = async (req, res) => {
                 }
                 return true;
             });
+
+            // Validate image quality (if enabled via environment variable)
+            // Note: Requires 'sharp' package for full validation: npm install sharp
+            if (process.env.ENABLE_IMAGE_QUALITY_VALIDATION === 'true') {
+                try {
+                    const { validateMultipleImages } = await import('../utils/imageValidation.js');
+                    const imageBuffers = validFiles.map(file => file.buffer);
+                    const validation = await validateMultipleImages(imageBuffers, {
+                        minWidth: 400,
+                        minHeight: 300,
+                        minFileSize: 50 * 1024, // 50KB minimum
+                        maxFileSize: maxSize
+                    });
+
+                    if (!validation.valid && validation.errors.length > 0) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Image quality validation failed',
+                            errors: validation.errors,
+                            warnings: validation.warnings
+                        });
+                    }
+
+                    // Log warnings but allow upload
+                    if (validation.warnings.length > 0) {
+                        Logger.warn('Image quality warnings', {
+                            userId: req.user._id,
+                            warnings: validation.warnings
+                        });
+                    }
+                } catch (validationError) {
+                    // If validation fails (e.g., sharp not installed), log and continue
+                    Logger.warn('Image quality validation skipped', {
+                        error: validationError.message,
+                        userId: req.user._id
+                    });
+                }
+            }
 
             // Upload images with compression and EXIF removal
             // Maintain order by processing sequentially or using index
@@ -243,12 +368,26 @@ export const createCar = async (req, res) => {
             vehicleTypeCategoryId = vehicleTypeCategory;
         }
 
+        // Check auto-approve listings setting
+        const Settings = (await import('../models/settingsModel.js')).default;
+        const autoApproveListingsSetting = await Settings.findOne({ key: 'autoApproveListings' });
+        const autoApproveListings = autoApproveListingsSetting && 
+            (autoApproveListingsSetting.value === true || 
+             autoApproveListingsSetting.value === 'true' || 
+             autoApproveListingsSetting.value === 1 || 
+             autoApproveListingsSetting.value === '1');
+
+        // Auto-approve if setting is enabled OR if user is admin
+        const shouldAutoApprove = autoApproveListings || req.user.role === 'admin';
+
         // Create car document - optimized with proper type conversion and trimming
+        // normalizeString function already defined above for duplicate checking
+        
         const carData = {
             title: String(title).trim(),
             description: (description || '').trim(),
-            make: String(make).trim(),
-            model: String(model).trim(),
+            make: normalizeString(make),
+            model: normalizeString(model),
             variant: (variant || 'N/A').trim(),
             year: parseInt(year, 10),
             condition: String(condition).trim(),
@@ -257,7 +396,11 @@ export const createCar = async (req, res) => {
             colorInterior: (colorInterior || 'N/A').trim(),
             fuelType: String(fuelType).trim(),
             transmission: String(transmission).trim(),
-            mileage: parseInt(mileage, 10) || 0,
+            mileage: mileageNum,
+            mileageHistory: [mileageHistoryEntry],
+            mileageVerified: false,
+            mileageFlagged: suspiciousMileage,
+            mileageFlagReason: suspiciousMileage ? 'Suspiciously low mileage for vehicle age' : null,
             features: parsedFeatures, // Already parsed and validated by parseArray
             regionalSpec: String(regionalSpec).trim(),
             vehicleType: selectedVehicleType,
@@ -274,8 +417,14 @@ export const createCar = async (req, res) => {
             ownerType: String(ownerType).trim(),
             images, // Array of Cloudinary URLs
             postedBy: req.user._id, // Set from authenticated user
-            isApproved: true, // Auto-approve by default
+            isApproved: shouldAutoApprove, // Use setting or admin status
             status: 'active', // Set initial status
+            // Set expiry date (90 days from now, or use provided value if any)
+            expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : (() => {
+                const expiry = new Date();
+                expiry.setDate(expiry.getDate() + 90); // Default: 90 days
+                return expiry;
+            })(),
         };
 
         // Conditionally add fields based on vehicle type
@@ -333,8 +482,6 @@ export const createCar = async (req, res) => {
             }
         }
         // Don't set batteryRange/motorPower for non-E-bike vehicles
-
-        // console.log('Car data before saving:', carData);
 
         const car = await Car.create(carData);
 
@@ -407,6 +554,20 @@ export const editCar = async (req, res) => {
 
         // Extract fields from request body
         const updateData = { ...req.body };
+
+        // Normalize make/model if being updated (for data consistency)
+        if (updateData.make && typeof updateData.make === 'string') {
+            updateData.make = updateData.make.trim()
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+        }
+        if (updateData.model && typeof updateData.model === 'string') {
+            updateData.model = updateData.model.trim()
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+        }
 
         // Handle image updates if new images are provided
         if (req.files && req.files.length > 0) {
@@ -493,6 +654,49 @@ export const editCar = async (req, res) => {
         if (updateData.engineCapacity) updateData.engineCapacity = parseInt(updateData.engineCapacity);
         if (updateData.horsepower) updateData.horsepower = parseInt(updateData.horsepower);
 
+        // Validate mileage if being updated
+        if (updateData.mileage !== undefined) {
+            const newMileage = parseInt(updateData.mileage, 10);
+            
+            if (newMileage < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Mileage cannot be negative.',
+                });
+            }
+            
+            // Check if mileage is decreasing (possible odometer rollback)
+            if (car.mileage && newMileage < car.mileage) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Mileage cannot decrease. If this is a correction, please contact support.',
+                });
+            }
+            
+            // Add to mileage history
+            if (!car.mileageHistory) car.mileageHistory = [];
+            car.mileageHistory.push({
+                mileage: newMileage,
+                recordedAt: new Date(),
+                recordedBy: req.user._id,
+                source: 'update'
+            });
+            
+            // Check for suspicious changes (large increases)
+            if (car.mileage && newMileage - car.mileage > 50000) {
+                car.mileageFlagged = true;
+                car.mileageFlagReason = 'Large mileage increase detected';
+            } else if (car.mileageFlagged && newMileage > car.mileage) {
+                // Clear flag if mileage increases normally
+                car.mileageFlagged = false;
+                car.mileageFlagReason = null;
+            }
+            
+            updateData.mileageHistory = car.mileageHistory;
+            updateData.mileageFlagged = car.mileageFlagged;
+            updateData.mileageFlagReason = car.mileageFlagReason;
+        }
+
         // Validate contactNumber if provided
         if (updateData.contactNumber && !/^\+?\d{9,15}$/.test(updateData.contactNumber)) {
             return res.status(400).json({
@@ -557,7 +761,7 @@ export const deleteCar = async (req, res) => {
         });
 
     } catch (error) {
-        console.log("Delete Car Error", error.message);
+        Logger.error("Delete Car Error", error, { carId: req.params.id, userId: req.user?._id });
         return res.status(500).json(
             {
                 message: "Server error while deleting car.",
@@ -569,25 +773,51 @@ export const deleteCar = async (req, res) => {
 
 // GetMyCars (My Listing) Car Controller
 // This shows cars posted by user that are not fully deleted
+// Optional query param: status (active, sold, expired, all)
 export const getMyCars = async (req, res) => {
     try {
-        const cars = await Car.find({
+        const statusFilter = req.query.status; // Optional: 'active', 'sold', 'expired', or undefined (all)
+        
+        // Build query
+        const query = {
             postedBy: req.user._id,
-            status: { $ne: "deleted" },
-        })
+            status: { $ne: "deleted" }, // Exclude fully deleted
+        };
+        
+        // Apply status filter if provided
+        if (statusFilter && statusFilter !== 'all') {
+            if (statusFilter === 'active') {
+                query.status = 'active';
+            } else if (statusFilter === 'sold') {
+                query.status = 'sold';
+            } else if (statusFilter === 'expired') {
+                query.status = 'expired';
+            }
+        }
+        
+        const cars = await Car.find(query)
             .sort({ createdAt: -1 })
             .populate({
                 path: "postedBy",
                 select: "name email role"
             });
 
+        // Count by status for stats
+        const stats = {
+            total: await Car.countDocuments({ postedBy: req.user._id, status: { $ne: "deleted" } }),
+            active: await Car.countDocuments({ postedBy: req.user._id, status: 'active' }),
+            sold: await Car.countDocuments({ postedBy: req.user._id, status: 'sold' }),
+            expired: await Car.countDocuments({ postedBy: req.user._id, status: 'expired' }),
+        };
+
         return res.status(200).json({
             message: "My Cars Fetched Successfully.",
             total: cars.length,
+            stats,
             cars
         });
     } catch (error) {
-        console.log("My Cars Errors:", error.message);
+        Logger.error("My Cars Errors", error, { userId: req.user?._id });
         return res.status(500).json({
             message: 'Failed to get user cars',
             error: error.message
@@ -619,21 +849,26 @@ export const getAllCars = async (req, res) => {
         const now = new Date();
 
         // Build query - show approved cars (or cars without isApproved field, which defaults to true)
-        // Exclude hard-deleted cars, and exclude sold cars past their autoDeleteDate
+        // Exclude hard-deleted, expired, and sold cars past their autoDeleteDate
         const baseQuery = {
             $and: [
                 {
                     $or: [{ isApproved: true }, { isApproved: { $exists: false } }],
                 },
                 {
-                    status: { $ne: "deleted" },
+                    status: { $nin: ["deleted", "expired"] }, // Exclude deleted and expired
                 },
                 {
+                    // Allow sold listings only if they haven't passed autoDeleteDate
                     $or: [
                         { status: { $ne: "sold" } },
-                        { autoDeleteDate: { $gt: now } },
-                        // Backwards-compatibility: listings without autoDeleteDate stay visible
-                        { autoDeleteDate: { $exists: false } },
+                        {
+                            status: "sold",
+                            $or: [
+                                { autoDeleteDate: { $gt: now } },
+                                { autoDeleteDate: { $exists: false } }
+                            ]
+                        },
                     ],
                 },
             ],
@@ -651,18 +886,20 @@ export const getAllCars = async (req, res) => {
         }
 
         // Add condition filter if provided
+        // Note: condition enum values are "New" and "Used" (capitalized), but query might use lowercase
         let query = { ...baseQuery };
-        if (
-            req.query.condition &&
-            (req.query.condition === "new" || req.query.condition === "used")
-        ) {
-            // Use $and to combine conditions properly
-            query = {
-                $and: [
-                    { $or: [{ isApproved: true }, { isApproved: { $exists: false } }] },
-                    { condition: req.query.condition },
-                ]
-            };
+        if (req.query.condition) {
+            const conditionValue = req.query.condition;
+            // Normalize condition value (capitalize first letter)
+            const normalizedCondition = conditionValue.charAt(0).toUpperCase() + conditionValue.slice(1).toLowerCase();
+            if (normalizedCondition === "New" || normalizedCondition === "Used") {
+                query = {
+                    $and: [
+                        ...baseQuery.$and,
+                        { condition: normalizedCondition }
+                    ]
+                };
+            }
         }
 
         // Add vehicleType filter if provided
@@ -687,7 +924,7 @@ export const getAllCars = async (req, res) => {
         // Add featured filter if provided
         if (req.query.featured === 'true' || req.query.featured === true) {
             query.featured = true;
-            console.log('Featured filter applied:', query.featured);
+            Logger.debug('Featured filter applied', { featured: query.featured });
         }
 
         // Fetch cars with pagination
@@ -808,10 +1045,25 @@ export const getSingleCar = async (req, res) => {
             Logger.error('Failed to track analytics', analyticsError, { carId: id });
         }
 
+        // Get price analysis (non-blocking, return in response if available)
+        let priceAnalysis = null;
+        try {
+            priceAnalysis = await getPriceAnalysis(car);
+        } catch (priceError) {
+            // Don't fail the request if price analysis fails
+            Logger.warn('Price analysis failed', priceError, { carId: id });
+        }
+
+        // Convert car to plain object and add price analysis
+        const carData = car.toObject ? car.toObject() : car;
+        if (priceAnalysis) {
+            carData.priceAnalysis = priceAnalysis;
+        }
+
         return res.status(200).json({
             success: true,
             message: "Single car fetched successfully",
-            data: car
+            data: carData
         });
     } catch (error) {
         Logger.error("Get Car Error", error, { carId: id });
@@ -883,8 +1135,24 @@ export const markCarAsSold = async (req, res) => {
         car.deletedAt = null;
         car.deletedBy = null;
         car.autoDeleteDate = markSold
-            ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+            ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days for sold listings
             : null;
+        
+        // If marking as available (relisting), reset expiry date (extend by 90 days)
+        if (!markSold) {
+            const newExpiry = new Date();
+            newExpiry.setDate(newExpiry.getDate() + 90);
+            car.expiryDate = newExpiry;
+            car.actualSalePrice = null; // Clear sale price when relisting
+        }
+        
+        // Store actual sale price if provided (optional, for analytics)
+        if (markSold && req.body.actualSalePrice) {
+            const salePrice = parseFloat(req.body.actualSalePrice);
+            if (!isNaN(salePrice) && salePrice > 0) {
+                car.actualSalePrice = salePrice;
+            }
+        }
 
         await car.save();
 
@@ -913,6 +1181,61 @@ export const markCarAsSold = async (req, res) => {
     }
 };
 
+/**
+ * Get Car Counts by Make (Brand Statistics)
+ */
+export const getCarCountsByMake = async (req, res) => {
+    try {
+        // Count active, non-sold cars grouped by make
+        const counts = await Car.aggregate([
+            {
+                $match: {
+                    status: 'active',
+                    isSold: { $ne: true },
+                    isApproved: { $ne: false },
+                    make: { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: "$make",
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    make: { $trim: { input: "$_id" } },
+                    count: 1
+                }
+            },
+            {
+                $sort: { make: 1 }
+            }
+        ]);
+
+        // Convert to object for easy lookup
+        const countsMap = {};
+        counts.forEach(item => {
+            const makeName = item.make.trim();
+            countsMap[makeName] = item.count;
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Car counts by make retrieved successfully.",
+            data: countsMap
+        });
+    } catch (error) {
+        Logger.error("Get Car Counts By Make Error", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 export const getFilteredCars = async (req, res) => {
     try {
         // Clean up expired boosts
@@ -934,11 +1257,11 @@ export const getFilteredCars = async (req, res) => {
         // Build filter query - show approved cars (or cars without isApproved field)
         let filter, locationFilter;
         try {
-            console.log('getFilteredCars - req.query:', JSON.stringify(req.query, null, 2));
+            Logger.debug('getFilteredCars - req.query', { query: req.query });
             const queryResult = buildCarQuery(req.query);
             filter = queryResult.filter;
             locationFilter = queryResult.locationFilter;
-            console.log('getFilteredCars - built filter:', JSON.stringify(filter, null, 2));
+            Logger.debug('getFilteredCars - built filter', { filter });
         } catch (queryError) {
             Logger.warn('Invalid filter query parameters', { error: queryError.message, query: req.query });
             return res.status(400).json({
@@ -957,13 +1280,20 @@ export const getFilteredCars = async (req, res) => {
 
         const now = new Date();
 
-        // Visibility filter: exclude deleted, and sold cars after their autoDeleteDate
+        // Visibility filter: exclude deleted, sold cars after their autoDeleteDate, and expired listings
         const visibilityFilter = {
-            status: { $ne: "deleted" },
+            status: { $nin: ["deleted", "expired", "sold"] }, // Exclude deleted, expired, and sold by default
             $or: [
-                { status: { $ne: "sold" } },
-                { autoDeleteDate: { $gt: now } },
-                { autoDeleteDate: { $exists: false } }
+                // Allow sold listings if they haven't passed autoDeleteDate
+                {
+                    status: "sold",
+                    $or: [
+                        { autoDeleteDate: { $gt: now } },
+                        { autoDeleteDate: { $exists: false } }
+                    ]
+                },
+                // Allow active listings
+                { status: "active" }
             ]
         };
 
@@ -976,7 +1306,7 @@ export const getFilteredCars = async (req, res) => {
             ]
         };
         
-        console.log('getFilteredCars - finalFilter:', JSON.stringify(finalFilter, null, 2));
+        Logger.debug('getFilteredCars - finalFilter', { finalFilter });
 
         // Add geospatial filter if location radius is specified
         if (locationFilter.radius && locationFilter.userLocation) {
@@ -1040,9 +1370,12 @@ export const getFilteredCars = async (req, res) => {
                 Car.countDocuments(finalFilter)
             ]);
             
-            console.log(`getFilteredCars - Found ${cars.length} cars (total: ${total}) with featured filter`);
+            Logger.debug(`getFilteredCars - Found ${cars.length} cars (total: ${total})`);
             if (req.query.featured === 'true' || req.query.featured === true) {
-                console.log('Featured cars details:', cars.map(c => ({ id: c._id, title: c.title, featured: c.featured, isApproved: c.isApproved, status: c.status })));
+                Logger.debug('Featured cars details', { 
+                    count: cars.filter(c => c.featured).length,
+                    total: total 
+                });
             }
         } catch (dbError) {
             Logger.error('Database query error in getFilteredCars', dbError);
@@ -1080,6 +1413,132 @@ export const getFilteredCars = async (req, res) => {
             success: false,
             message: "Error fetching cars. Please try again later.",
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Relist a sold or expired listing
+ * Creates a new active listing from sold/expired listing data
+ */
+export const relistCar = async (req, res) => {
+    try {
+        const { carId } = req.params;
+
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: User not authenticated",
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(carId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid car ID.",
+            });
+        }
+
+        const oldCar = await Car.findById(carId);
+        if (!oldCar) {
+            return res.status(404).json({
+                success: false,
+                message: "Car not found.",
+            });
+        }
+
+        // Check if user owns the car or is admin
+        if (
+            oldCar.postedBy.toString() !== req.user._id.toString() &&
+            req.user.role !== "admin"
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "You don't have permission to relist this car.",
+            });
+        }
+
+        // Only allow relisting sold or expired listings
+        if (oldCar.status !== "sold" && oldCar.status !== "expired") {
+            return res.status(400).json({
+                success: false,
+                message: "Only sold or expired listings can be relisted.",
+            });
+        }
+
+        // Create new listing data from old listing
+        const newCarData = {
+            title: oldCar.title,
+            description: oldCar.description,
+            make: oldCar.make,
+            model: oldCar.model,
+            variant: oldCar.variant,
+            year: oldCar.year,
+            condition: oldCar.condition,
+            price: oldCar.price,
+            colorExterior: oldCar.colorExterior,
+            colorInterior: oldCar.colorInterior,
+            fuelType: oldCar.fuelType,
+            transmission: oldCar.transmission,
+            mileage: oldCar.mileage,
+            features: oldCar.features,
+            regionalSpec: oldCar.regionalSpec,
+            bodyType: oldCar.bodyType,
+            city: oldCar.city,
+            location: oldCar.location,
+            sellerType: oldCar.sellerType,
+            contactNumber: oldCar.contactNumber,
+            geoLocation: oldCar.geoLocation,
+            warranty: oldCar.warranty,
+            ownerType: oldCar.ownerType,
+            vehicleType: oldCar.vehicleType,
+            vehicleTypeCategory: oldCar.vehicleTypeCategory,
+            postedBy: req.user._id,
+            status: "active",
+            isApproved: oldCar.isApproved,
+            images: oldCar.images,
+        };
+
+        // Set expiry date (90 days from now)
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 90);
+        newCarData.expiryDate = expiryDate;
+
+        // Conditionally add optional fields
+        if (oldCar.engineCapacity) newCarData.engineCapacity = oldCar.engineCapacity;
+        if (oldCar.horsepower) newCarData.horsepower = oldCar.horsepower;
+        if (oldCar.numberOfCylinders) newCarData.numberOfCylinders = oldCar.numberOfCylinders;
+        if (oldCar.carDoors) newCarData.carDoors = oldCar.carDoors;
+        if (oldCar.batteryRange) newCarData.batteryRange = oldCar.batteryRange;
+        if (oldCar.motorPower) newCarData.motorPower = oldCar.motorPower;
+
+        // Create new listing
+        const newCar = await Car.create(newCarData);
+
+        // Update user's carsPosted array
+        await User.findByIdAndUpdate(req.user._id, {
+            $addToSet: { carsPosted: newCar._id }
+        });
+
+        Logger.info(`Car relisted`, {
+            oldCarId: carId,
+            newCarId: newCar._id,
+            userId: req.user._id,
+            oldStatus: oldCar.status
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Listing relisted successfully. You can edit the details if needed.",
+            data: newCar
+        });
+
+    } catch (error) {
+        Logger.error("Relist Car Error", error, { userId: req.user?._id, carId: req.params.carId });
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === "development" ? error.message : undefined,
         });
     }
 };

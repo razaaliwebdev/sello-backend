@@ -107,6 +107,44 @@ export const upsertSetting = async (req, res) => {
             });
         }
 
+        // Validation rules for specific settings
+        const validationRules = {
+            siteName: {
+                required: true,
+                minLength: 2,
+                maxLength: 100,
+                type: "string"
+            },
+            contactEmail: {
+                required: true,
+                pattern: /^\S+@\S+\.\S+$/,
+                maxLength: 255,
+                type: "string"
+            },
+            maxListingsPerDealer: {
+                required: false,
+                min: 1,
+                max: 10000,
+                type: "number"
+            },
+            commissionRate: {
+                required: false,
+                min: 0,
+                max: 100,
+                type: "number"
+            },
+            siteLogo: {
+                required: false,
+                isUrl: true,
+                type: "string"
+            },
+            businessLogo: {
+                required: false,
+                isUrl: true,
+                type: "string"
+            }
+        };
+
         // Convert value based on type
         let processedValue = value;
         const valueType = type || "string";
@@ -114,15 +152,94 @@ export const upsertSetting = async (req, res) => {
         if (valueType === "boolean") {
             processedValue = value === true || value === "true" || value === 1 || value === "1";
         } else if (valueType === "number") {
-            processedValue = Number(value) || 0;
+            const numValue = Number(value);
+            if (isNaN(numValue)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid number value for setting "${key}".`
+                });
+            }
+            processedValue = numValue;
         } else if (valueType === "object" && typeof value === "string") {
             try {
                 processedValue = JSON.parse(value);
             } catch (e) {
-                processedValue = value;
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid JSON value for setting "${key}".`
+                });
             }
         } else {
             processedValue = String(value);
+        }
+
+        // Apply validation rules if they exist for this key
+        if (validationRules[key]) {
+            const rule = validationRules[key];
+            
+            // Check required
+            if (rule.required && (!processedValue || (typeof processedValue === 'string' && !processedValue.trim()))) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Setting "${key}" is required.`
+                });
+            }
+
+            // Type check
+            if (rule.type && typeof processedValue !== rule.type) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Setting "${key}" must be of type ${rule.type}.`
+                });
+            }
+
+            // String validations
+            if (rule.type === "string" && processedValue) {
+                if (rule.minLength && processedValue.length < rule.minLength) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Setting "${key}" must be at least ${rule.minLength} characters.`
+                    });
+                }
+                if (rule.maxLength && processedValue.length > rule.maxLength) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Setting "${key}" must be less than ${rule.maxLength} characters.`
+                    });
+                }
+                if (rule.pattern && !rule.pattern.test(processedValue)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Setting "${key}" has an invalid format.`
+                    });
+                }
+                if (rule.isUrl) {
+                    try {
+                        new URL(processedValue);
+                    } catch (e) {
+                        return res.status(400).json({
+                            success: false,
+                            message: `Setting "${key}" must be a valid URL.`
+                        });
+                    }
+                }
+            }
+
+            // Number validations
+            if (rule.type === "number" && processedValue !== undefined && processedValue !== null) {
+                if (rule.min !== undefined && processedValue < rule.min) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Setting "${key}" must be at least ${rule.min}.`
+                    });
+                }
+                if (rule.max !== undefined && processedValue > rule.max) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Setting "${key}" cannot exceed ${rule.max}.`
+                    });
+                }
+            }
         }
 
         const setting = await Settings.findOneAndUpdate(

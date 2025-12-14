@@ -12,7 +12,8 @@ import {
     getAllDealers,
     verifyUser,
     verifyDealer,
-    getListingHistory
+    getListingHistory,
+    getAuditLogsController
 } from '../controllers/adminController.js';
 import {
     getAllPayments,
@@ -57,6 +58,9 @@ router.get("/payments", getAllPayments);
 router.get("/subscriptions", getAllSubscriptions);
 router.put("/subscriptions/:userId", adminUpdateSubscription);
 router.delete("/subscriptions/:userId", adminCancelSubscription);
+
+// Audit Logs
+router.get("/audit-logs", getAuditLogsController);
 
 export default router;
 

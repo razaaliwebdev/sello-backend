@@ -77,11 +77,25 @@ export const getSubscriptionPlans = async (req, res) => {
         // Default to true if setting doesn't exist
         const isPaymentEnabled = paymentEnabled === null ? true : (paymentEnabled.value !== false && paymentEnabled.value !== 'false');
         
+        // Check if subscription tab should be shown (only check once)
+        const showTab = await Settings.findOne({ key: 'showSubscriptionTab' });
+        // Explicitly check: if setting exists and is explicitly false, return false, otherwise true
+        let showTabEnabled = true; // Default to true
+        if (showTab !== null && showTab !== undefined) {
+            // Check if value is explicitly false
+            if (showTab.value === false || showTab.value === 'false' || showTab.value === 0 || showTab.value === '0') {
+                showTabEnabled = false;
+            } else {
+                showTabEnabled = true;
+            }
+        }
+        
         if (!isPaymentEnabled) {
             return res.status(200).json({
                 success: true,
                 data: {},
-                paymentSystemEnabled: false
+                paymentSystemEnabled: false,
+                showSubscriptionTab: showTabEnabled
             });
         }
 
@@ -93,7 +107,8 @@ export const getSubscriptionPlans = async (req, res) => {
             return res.status(200).json({
                 success: true,
                 data: {},
-                paymentSystemEnabled: true
+                paymentSystemEnabled: true,
+                showSubscriptionTab: showTabEnabled
             });
         }
 
@@ -144,7 +159,8 @@ export const getSubscriptionPlans = async (req, res) => {
             return res.status(200).json({
                 success: true,
                 data: plansObject,
-                paymentSystemEnabled: true
+                paymentSystemEnabled: true,
+                showSubscriptionTab: showTabEnabled
             });
         }
 
@@ -152,7 +168,8 @@ export const getSubscriptionPlans = async (req, res) => {
         return res.status(200).json({
             success: true,
             data: LEGACY_PLANS,
-            paymentSystemEnabled: true
+            paymentSystemEnabled: true,
+            showSubscriptionTab: showTabEnabled
         });
     } catch (error) {
         Logger.error("Get Subscription Plans Error", error);

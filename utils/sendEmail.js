@@ -9,31 +9,13 @@ const sendEmail = async (to, subject, html) => {
     if (!process.env.SMTP_PASSWORD) missingVars.push('SMTP_PASSWORD');
     
     if (missingVars.length > 0) {
-        // In development mode or if not production, log to console instead of failing
-        const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
+        // Check if we're in production - if so, we MUST have SMTP configured
+        const isProduction = process.env.NODE_ENV === 'production';
+        const isDevelopment = !isProduction;
         
         if (isDevelopment) {
-            console.log("\n⚠️  =============================================");
-            console.log("⚠️  SMTP NOT CONFIGURED - DEVELOPMENT MODE");
-            console.log("⚠️  =============================================");
-            console.log("📧 Email To:", to);
-            console.log("📝 Subject:", subject);
-            
-            // Extract OTP from HTML if it's a password reset email
-            const otpMatch = html.match(/\d{4}/);
-            if (otpMatch) {
-                console.log("🔑 OTP CODE:", otpMatch[0]);
-                console.log("\n⚠️  IMPORTANT: Email not sent. Use the OTP code above for testing.");
-            }
-            
-            console.log("\n📝 To configure SMTP (for production), add to server/.env:");
-            console.log(`   SMTP_HOST=smtp.gmail.com`);
-            console.log(`   SMTP_PORT=587`);
-            console.log(`   SMTP_MAIL=your-email@gmail.com`);
-            console.log(`   SMTP_PASSWORD=your-app-password`);
-            console.log("⚠️  =============================================\n");
-            
-            return { messageId: 'dev-mode', accepted: [to] };
+            // Return a special marker so we know email wasn't actually sent
+            return { messageId: 'dev-mode', accepted: [to], actuallySent: false };
         }
         
         // In production, throw error
@@ -60,9 +42,7 @@ const sendEmail = async (to, subject, html) => {
     // Verify transporter configuration
     try {
         await transporter.verify();
-        console.log("✓ SMTP server is ready to send emails");
     } catch (verifyError) {
-        console.error("❌ SMTP verification failed:", verifyError.message);
         throw new Error("SMTP server configuration is invalid: " + verifyError.message);
     }
 
@@ -75,11 +55,8 @@ const sendEmail = async (to, subject, html) => {
 
     try {
         const info = await transporter.sendMail(mailOptions);
-        console.log(`✓ Email sent successfully to ${to}. Message ID: ${info.messageId}`);
-        return info;
+        return { ...info, actuallySent: true }; // Mark as actually sent
     } catch (sendError) {
-        console.error("❌ Failed to send email:", sendError.message);
-        console.error("Error details:", sendError);
         
         // Provide more specific error messages
         let errorMessage = "Failed to send email";

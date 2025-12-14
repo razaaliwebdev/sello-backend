@@ -22,7 +22,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "sellerType",
       "warranty",
       "ownerType",
-      "geoLocation",
     ],
     optional: [
       "description",
@@ -35,6 +34,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "carDoors",
       "horsepower",
       "numberOfCylinders",
+      "geoLocation", // Made optional - will use default if not provided
     ],
   },
   Bus: {
@@ -54,7 +54,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "sellerType",
       "warranty",
       "ownerType",
-      "geoLocation",
     ],
     optional: [
       "description",
@@ -66,6 +65,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "location",
       "horsepower",
       "numberOfCylinders",
+      "geoLocation", // Made optional
     ],
   },
   Truck: {
@@ -85,7 +85,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "sellerType",
       "warranty",
       "ownerType",
-      "geoLocation",
     ],
     optional: [
       "description",
@@ -130,6 +129,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "carDoors",
       "horsepower",
       "numberOfCylinders",
+      "geoLocation", // Made optional
     ],
   },
   Bike: {
@@ -149,7 +149,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "sellerType",
       "warranty",
       "ownerType",
-      "geoLocation",
     ],
     optional: [
       "description",
@@ -160,6 +159,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "features",
       "location",
       "horsepower",
+      "geoLocation", // Made optional
     ],
   },
   "E-bike": {
@@ -178,7 +178,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "sellerType",
       "warranty",
       "ownerType",
-      "geoLocation",
     ],
     optional: [
       "description",
@@ -190,6 +189,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "location",
       "batteryRange",
       "motorPower",
+      "geoLocation", // Made optional
     ],
   },
 };

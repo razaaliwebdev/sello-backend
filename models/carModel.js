@@ -29,6 +29,15 @@ const carSchema = new mongoose.Schema(
         },
         transmission: { type: String, required: true, enum: ["Manual", "Automatic"] },
         mileage: { type: Number, default: 0 },
+        mileageHistory: [{
+            mileage: { type: Number, required: true },
+            recordedAt: { type: Date, default: Date.now },
+            recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+            source: { type: String, enum: ["listing", "update", "verification"], default: "listing" }
+        }],
+        mileageVerified: { type: Boolean, default: false },
+        mileageFlagged: { type: Boolean, default: false },
+        mileageFlagReason: { type: String, default: null },
         features: {
             type: [String],
             default: [],
@@ -174,6 +183,18 @@ const carSchema = new mongoose.Schema(
             default: false,
             index: true,
         },
+        // Listing expiry for active listings (default: 90 days from creation)
+        expiryDate: {
+            type: Date,
+            default: null, // Will be set in controller
+            index: true,
+        },
+        // Actual sale price (if different from listing price)
+        actualSalePrice: {
+            type: Number,
+            default: null,
+            min: 0,
+        },
         deletedAt: {
             type: Date,
             default: null,
@@ -237,6 +258,16 @@ const carSchema = new mongoose.Schema(
             default: false,
             index: true,
         },
+        // Duplicate detection flags
+        isPotentialDuplicate: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        duplicateCheckedAt: {
+            type: Date,
+            default: null,
+        },
     },
     {
         timestamps: true,
@@ -263,6 +294,16 @@ carSchema.index({ motorPower: 1 });
 carSchema.index({ price: 1 });
 carSchema.index({ year: 1 });
 carSchema.index({ mileage: 1 });
+// Additional indexes for common query patterns
+carSchema.index({ make: 1, model: 1 }); // For make/model filtering
+carSchema.index({ city: 1, status: 1, isApproved: 1 }); // For city-based queries
+carSchema.index({ condition: 1, status: 1, isApproved: 1 }); // For condition filtering
+carSchema.index({ fuelType: 1, status: 1, isApproved: 1 }); // For fuel type filtering
+carSchema.index({ transmission: 1, status: 1, isApproved: 1 }); // For transmission filtering
+carSchema.index({ createdAt: -1 }); // For sorting by newest
+carSchema.index({ price: 1, status: 1, isApproved: 1 }); // For price range queries with status
+carSchema.index({ expiryDate: 1, status: 1 }); // For expiry queries
+carSchema.index({ postedBy: 1, status: 1 }); // For user listings by status
 
 const Car = mongoose.model("Car", carSchema);
 

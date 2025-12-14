@@ -6,9 +6,12 @@ import {
     verifyOtp,
     resetPassword,
     googleLogin,
-    logout
+    logout,
+    sendPhoneVerification,
+    verifyPhone
 } from '../controllers/authController.js';
 import { upload } from '../middlewares/multer.js';
+import { auth } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
@@ -24,6 +27,10 @@ router.post("/verify-otp", verifyOtp);
 router.post("/reset-password", resetPassword);
 router.post("/google", googleLogin);
 router.post("/logout", logout);
+
+// Protected Phone Verification Routes
+router.post("/phone/send-code", auth, sendPhoneVerification);
+router.post("/phone/verify", auth, verifyPhone);
 
 export default router;
 

@@ -23,7 +23,8 @@ const inviteSchema = new mongoose.Schema(
         role: {
             type: String,
             required: true,
-            enum: ["Super Admin", "Marketing Team", "Support Agent", "Blogs/Content Agent", "Custom"]
+            enum: ["Super Admin", "Marketing Team", "Support Agent", "Blogs/Content Agent", "Custom"],
+            default: "Custom"
         },
         roleId: {
             type: mongoose.Schema.Types.ObjectId,

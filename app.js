@@ -30,7 +30,11 @@ import reviewRouter from './routes/reviewRoutes.js';
 import recommendationsRouter from './routes/recommendationsRoutes.js';
 import subscriptionRouter from './routes/subscriptionRoutes.js';
 import subscriptionPlanRouter from './routes/subscriptionPlanRoutes.js';
+import verificationRouter from './routes/verificationRoutes.js';
+import savedSearchRouter from './routes/savedSearchRoutes.js';
+import priceRouter from './routes/priceRoutes.js';
 import { performanceMonitor } from './middlewares/performanceMiddleware.js';
+import { checkMaintenanceMode } from './middlewares/maintenanceModeMiddleware.js';
 import Logger from './utils/logger.js';
 import mongoose from 'mongoose';
 import {
@@ -126,9 +130,20 @@ import { rateLimit, validateFileUpload } from './middlewares/securityMiddleware.
 app.use(sanitizeInput(['password', 'token', 'otp', 'content', 'description', 'message', 'geoLocation']));
 
 // Rate limiting (use Redis in production for distributed systems)
-if (process.env.NODE_ENV === 'production') {
-  app.use(rateLimit);
-}
+// Apply rate limiting in all environments
+// Development: More lenient (500 req/15min), Production: Stricter (100 req/15min)
+app.use(rateLimit);
+
+// Maintenance mode check - apply to all routes except admin routes
+// Admin routes will be handled separately to allow admins to manage settings
+app.use((req, res, next) => {
+  // Skip maintenance mode check for admin routes
+  if (req.path.startsWith('/api/admin')) {
+    return next();
+  }
+  // Apply maintenance mode check to all other routes
+  return checkMaintenanceMode(req, res, next);
+});
 
 // ROUTES
 app.use("/api/auth", authRouter);
@@ -157,6 +172,9 @@ app.use("/api/reviews", reviewRouter);
 app.use("/api/recommendations", recommendationsRouter);
 app.use("/api/subscriptions", subscriptionRouter);
 app.use("/api/subscription-plans", subscriptionPlanRouter);
+app.use("/api/verification", verificationRouter);
+app.use("/api/saved-searches", savedSearchRouter);
+app.use("/api/price", priceRouter);
 
 // Health check route
 app.get("/", (req, res) => {

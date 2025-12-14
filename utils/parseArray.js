@@ -48,20 +48,13 @@ export const buildCarQuery = (query) => {
         throw new Error('Invalid query parameters');
     }
 
-    // Keyword/text search - search across multiple fields (optimized)
+    // Keyword/text search - use MongoDB text search for better performance
     if (query.search || query.keyword || query.q) {
         const searchTerm = (query.search || query.keyword || query.q).trim();
         if (searchTerm && searchTerm.length >= 2) { // Minimum 2 characters for search
-            // Use $or to search across multiple fields for better results
-            // Use text index if available, otherwise use regex
-            filter.$or = [
-                { title: { $regex: searchTerm, $options: 'i' } },
-                { make: { $regex: searchTerm, $options: 'i' } },
-                { model: { $regex: searchTerm, $options: 'i' } },
-                { description: { $regex: searchTerm, $options: 'i' } },
-                { city: { $regex: searchTerm, $options: 'i' } },
-                { location: { $regex: searchTerm, $options: 'i' } }
-            ];
+            // Use MongoDB text search (requires text index on title, make, model, description)
+            // This is much faster than regex queries, especially on large datasets
+            filter.$text = { $search: searchTerm };
         } else if (searchTerm.length < 2) {
             throw new Error('Search term must be at least 2 characters long');
         }
@@ -102,7 +95,6 @@ export const buildCarQuery = (query) => {
     // Featured filter
     if (query.featured === 'true' || query.featured === true || query.featured === '1') {
         filter.featured = true;
-        console.log('Featured filter applied in buildCarQuery:', { featured: query.featured, type: typeof query.featured });
     }
 
     // Enum validation for single-value fields

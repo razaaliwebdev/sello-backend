@@ -26,52 +26,197 @@ export const createNotification = async (req, res) => {
         // Determine targetRole based on targetAudience
         let targetRole = null;
         if (targetAudience && targetAudience !== 'all' && !recipient) {
-            // Map targetAudience to role
+            // Map targetAudience to role (matching User model roles: "individual", "dealer", "admin")
             const roleMap = {
-                'buyers': 'buyer',
-                'sellers': 'seller',
-                'dealers': 'dealer'
+                'buyers': 'individual',  // Buyers are individuals
+                'sellers': 'individual', // Sellers are individuals
+                'dealers': 'dealer'      // Dealers
             };
             targetRole = roleMap[targetAudience] || null;
         }
 
-        const notification = await Notification.create({
+        let notifications = [];
+        const notificationData = {
             title: title.trim(),
             message,
             type: type || "info",
-            recipient: recipient || null, // null = broadcast or role-based
-            targetRole: targetRole,
             actionUrl: actionUrl || null,
             actionText: actionText || null,
             createdBy: req.user._id,
             expiresAt: expiresAt ? new Date(expiresAt) : null
-        });
+        };
+
+        // If specific recipient, create single notification
+        if (recipient) {
+            const notification = await Notification.create({
+                ...notificationData,
+                recipient: recipient,
+                targetRole: null
+            });
+            notifications.push(notification);
+        } 
+        // If targetAudience is "all", create notification for each user
+        else if (targetAudience === 'all') {
+            try {
+                // Get ALL non-admin users (most inclusive - will send to everyone except admins)
+                // This ensures notifications are delivered even if status field is not set
+                const users = await User.find({ 
+                    role: { $ne: "admin" }
+                }).select('_id email name verified status role');
+                
+                console.log(`[Notification] Found ${users.length} non-admin users to send notifications to`);
+                
+                if (users.length > 0) {
+                    console.log(`[Notification] Sample users:`, users.slice(0, 3).map(u => ({ 
+                        email: u.email, 
+                        status: u.status,
+                        role: u.role 
+                    })));
+                }
+                
+                // If still no users found, return error with debug info
+                if (users.length === 0) {
+                    const totalUsers = await User.countDocuments({ role: { $ne: "admin" } });
+                    const sampleUsers = await User.find({ role: { $ne: "admin" } })
+                        .select('_id email name verified status role')
+                        .limit(5);
+                    
+                    console.log(`[Notification] No users found. Total non-admin users: ${totalUsers}`);
+                    console.log(`[Notification] Sample users:`, sampleUsers.map(u => ({ 
+                        id: u._id, 
+                        email: u.email, 
+                        verified: u.verified, 
+                        status: u.status,
+                        role: u.role 
+                    })));
+                    
+                    return res.status(400).json({
+                        success: false,
+                        message: `No users found to send notifications to. Total non-admin users in database: ${totalUsers}.`,
+                        debug: process.env.NODE_ENV === 'development' ? {
+                            totalUsers,
+                            sampleUsers: sampleUsers.map(u => ({ 
+                                id: u._id, 
+                                email: u.email, 
+                                verified: u.verified, 
+                                status: u.status,
+                                role: u.role 
+                            }))
+                        } : undefined
+                    });
+                }
+                
+                // Create notification for each user in batches to avoid overwhelming the database
+                const batchSize = 100;
+                let createdCount = 0;
+                let errorCount = 0;
+                
+                for (let i = 0; i < users.length; i += batchSize) {
+                    const batch = users.slice(i, i + batchSize);
+                    const batchPromises = batch.map(async (user) => {
+                        try {
+                            const notif = await Notification.create({
+                                ...notificationData,
+                                recipient: user._id,
+                                targetRole: null
+                            });
+                            return notif;
+                        } catch (err) {
+                            console.error(`[Notification] Error creating notification for user ${user._id}:`, err.message);
+                            errorCount++;
+                            return null;
+                        }
+                    });
+                    const batchNotifications = await Promise.all(batchPromises);
+                    const successfulNotifications = batchNotifications.filter(n => n !== null);
+                    notifications.push(...successfulNotifications);
+                    createdCount += successfulNotifications.length;
+                }
+                
+                if (createdCount === 0) {
+                    return res.status(500).json({
+                        success: false,
+                        message: "Failed to create any notifications. Please check server logs for errors."
+                    });
+                }
+                
+                // Update notifications array to only include successfully created ones
+                notifications = notifications.filter(n => n !== null);
+            } catch (error) {
+                console.error("[Notification] Error in creating notifications for all users:", error);
+                console.error("[Notification] Error stack:", error.stack);
+                return res.status(500).json({
+                    success: false,
+                    message: "Error creating notifications: " + error.message,
+                    error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+                });
+            }
+        }
+        // If role-based, create notification for each user with that role
+        else if (targetRole) {
+            const users = await User.find({ 
+                role: targetRole,
+                status: "active",
+                verified: true
+            }).select('_id email name');
+            
+            if (users.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `No active users found with role "${targetRole}" to send notifications to.`
+                });
+            }
+            
+            // Create notification for each user in batches
+            const batchSize = 100;
+            for (let i = 0; i < users.length; i += batchSize) {
+                const batch = users.slice(i, i + batchSize);
+                const batchPromises = batch.map(user => 
+                    Notification.create({
+                        ...notificationData,
+                        recipient: user._id,
+                        targetRole: targetRole
+                    })
+                );
+                const batchNotifications = await Promise.all(batchPromises);
+                notifications.push(...batchNotifications);
+            }
+        }
+        // Fallback: create single broadcast notification (for backward compatibility)
+        else {
+            const notification = await Notification.create({
+                ...notificationData,
+                recipient: null,
+                targetRole: null
+            });
+            notifications.push(notification);
+        }
 
         // Emit notification via socket.io
         try {
             const io = req.app.get('io');
             if (io) {
-                const notificationData = {
-                    _id: notification._id,
-                    title: notification.title,
-                    message: notification.message,
-                    type: notification.type,
-                    actionUrl: notification.actionUrl,
-                    actionText: notification.actionText,
-                    createdAt: notification.createdAt
+                const socketNotificationData = {
+                    _id: notifications[0]?._id,
+                    title: notificationData.title,
+                    message: notificationData.message,
+                    type: notificationData.type,
+                    actionUrl: notificationData.actionUrl,
+                    actionText: notificationData.actionText,
+                    createdAt: notifications[0]?.createdAt || new Date()
                 };
 
                 if (recipient) {
                     // Send to specific user
-                    io.to(`user:${recipient}`).emit('new-notification', notificationData);
+                    io.to(`user:${recipient}`).emit('new-notification', socketNotificationData);
                 } else if (targetRole) {
                     // Send to all users with specific role
-                    io.to(`role:${targetRole}`).emit('new-notification', notificationData);
+                    io.to(`role:${targetRole}`).emit('new-notification', socketNotificationData);
                     // Also emit to admin room for tracking
-                    io.to('admin:room').emit('new-notification', notificationData);
+                    io.to('admin:room').emit('new-notification', socketNotificationData);
                 } else {
                     // Broadcast to all users
-                    io.emit('new-notification', notificationData);
+                    io.emit('new-notification', socketNotificationData);
                 }
             }
         } catch (socketError) {
@@ -81,8 +226,11 @@ export const createNotification = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: "Notification created and sent successfully.",
-            data: notification
+            message: `Notification created and sent successfully to ${notifications.length} user(s).`,
+            data: {
+                notification: notifications[0], // Return first notification for compatibility
+                count: notifications.length
+            }
         });
     } catch (error) {
         console.error("Create Notification Error:", error.message);
@@ -158,24 +306,11 @@ export const getUserNotifications = async (req, res) => {
         const skip = (page - 1) * limit;
         const { isRead } = req.query;
 
-        const userRole = req.user.role;
-
-        // Build the query structure properly
+        // Simplified query: only get notifications where user is the recipient
+        // This works because we now create individual notifications for each user
         const finalQuery = {
             $and: [
-                {
-                    $or: [
-                        { recipient: req.user._id }, // Specific user notifications
-                        { 
-                            recipient: null,
-                            targetRole: null // Broadcast to all users
-                        },
-                        {
-                            recipient: null,
-                            targetRole: userRole // Role-based notifications
-                        }
-                    ]
-                },
+                { recipient: req.user._id }, // Only notifications sent to this user
                 {
                     $or: [
                         { expiresAt: null },
@@ -249,7 +384,7 @@ export const markAsRead = async (req, res) => {
         }
 
         // Check if user has access to this notification
-        if (notification.recipient && notification.recipient.toString() !== req.user._id.toString()) {
+        if (!notification.recipient || notification.recipient.toString() !== req.user._id.toString()) {
             return res.status(403).json({
                 success: false,
                 message: "You don't have access to this notification."
@@ -282,10 +417,7 @@ export const markAllAsRead = async (req, res) => {
     try {
         await Notification.updateMany(
             {
-                $or: [
-                    { recipient: req.user._id },
-                    { recipient: null }
-                ],
+                recipient: req.user._id, // Only user's own notifications
                 isRead: false
             },
             {

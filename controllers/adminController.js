@@ -2,6 +2,7 @@ import User from '../models/userModel.js';
 import Car from '../models/carModel.js';
 import CustomerRequest from '../models/customerRequestModel.js';
 import ListingHistory from '../models/listingHistoryModel.js';
+import { getAuditLogs } from '../utils/auditLogger.js';
 import mongoose from 'mongoose';
 import Logger from '../utils/logger.js';
 
@@ -409,7 +410,7 @@ export const getAllUsers = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get All Users Error:", error.message);
+        Logger.error("Get All Users Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -472,7 +473,7 @@ export const updateUser = async (req, res) => {
         }
 
         const { userId } = req.params;
-        const { name, role, status, boostCredits, subscription } = req.body;
+        const { name, role, status, boostCredits, subscription, adminRole, roleId, permissions } = req.body;
 
         // Prevent admin from modifying themselves
         if (userId === req.user._id.toString()) {
@@ -506,6 +507,24 @@ export const updateUser = async (req, res) => {
             if (subscription.isActive !== undefined) user.subscription.isActive = subscription.isActive;
             if (subscription.startDate) user.subscription.startDate = new Date(subscription.startDate);
             if (subscription.endDate) user.subscription.endDate = new Date(subscription.endDate);
+        }
+
+        // Update admin role fields (for team members)
+        if (adminRole !== undefined) {
+            user.adminRole = adminRole;
+        }
+        if (roleId !== undefined) {
+            // Validate roleId is a valid ObjectId
+            if (roleId && !mongoose.Types.ObjectId.isValid(roleId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid roleId format."
+                });
+            }
+            user.roleId = roleId || null;
+        }
+        if (permissions !== undefined && typeof permissions === 'object') {
+            user.permissions = permissions;
         }
 
         await user.save();
@@ -925,7 +944,7 @@ export const featureCar = async (req, res) => {
         
         // Log for debugging (only in development)
         if (process.env.NODE_ENV === 'development') {
-            console.log("Feature Car Request:", { carId, featured, body: req.body, params: req.params, user: req.user?._id });
+            Logger.debug("Feature Car Request", { carId, featured, body: req.body, params: req.params, userId: req.user?._id });
         }
 
         if (!mongoose.Types.ObjectId.isValid(carId)) {
@@ -1055,7 +1074,7 @@ export const getAllDealers = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get All Dealers Error:", error.message);
+        Logger.error("Get All Dealers Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -1099,8 +1118,21 @@ export const verifyDealer = async (req, res) => {
             user.dealerInfo = {};
         }
 
-        user.dealerInfo.verified = verified === true || verified === 'true';
-        user.dealerInfo.verifiedAt = verified ? new Date() : null;
+        // Check if auto-approve dealers is enabled
+        const Settings = (await import('../models/settingsModel.js')).default;
+        const autoApproveDealersSetting = await Settings.findOne({ key: 'autoApproveDealers' });
+        const autoApproveDealers = autoApproveDealersSetting && 
+            (autoApproveDealersSetting.value === true || 
+             autoApproveDealersSetting.value === 'true' || 
+             autoApproveDealersSetting.value === 1 || 
+             autoApproveDealersSetting.value === '1');
+
+        // If auto-approve is enabled and admin is trying to verify, auto-approve
+        // Otherwise, use the provided verified value
+        const shouldVerify = autoApproveDealers ? true : (verified === true || verified === 'true');
+
+        user.dealerInfo.verified = shouldVerify;
+        user.dealerInfo.verifiedAt = shouldVerify ? new Date() : null;
 
         await user.save();
 
@@ -1119,6 +1151,68 @@ export const verifyDealer = async (req, res) => {
         });
     } catch (error) {
         Logger.error("Verify Dealer Error", error, { userId: req.user?._id, targetUserId: req.params.userId });
+        return res.status(500).json({
+            success: false,
+            message: "Server error. Please try again later.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Get Audit Logs (Admin)
+ */
+export const getAuditLogsController = async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: "Only admins can view audit logs."
+            });
+        }
+
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const { actor, target, action, dateFrom, dateTo } = req.query;
+
+        // Build filters
+        const filters = {};
+        if (actor) {
+            filters.actor = mongoose.Types.ObjectId.isValid(actor) ? actor : null;
+        }
+        if (target) {
+            filters.target = mongoose.Types.ObjectId.isValid(target) ? target : null;
+        }
+        if (action) {
+            filters.action = action;
+        }
+        if (dateFrom || dateTo) {
+            filters.timestamp = {};
+            if (dateFrom) {
+                filters.timestamp.$gte = new Date(dateFrom);
+            }
+            if (dateTo) {
+                filters.timestamp.$lte = new Date(dateTo);
+            }
+        }
+
+        const result = await getAuditLogs(filters, page, limit);
+
+        return res.status(200).json({
+            success: true,
+            message: "Audit logs retrieved successfully.",
+            data: {
+                logs: result.logs,
+                pagination: {
+                    page: result.page,
+                    pages: result.pages,
+                    total: result.total,
+                    limit
+                }
+            }
+        });
+    } catch (error) {
+        Logger.error("Get Audit Logs Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
