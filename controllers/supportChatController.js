@@ -386,7 +386,9 @@ export const sendSupportMessage = async (req, res) => {
                         const url = await uploadCloudinary(file.buffer);
                         return url;
                     } catch (err) {
-                        console.error("Error uploading attachment:", err);
+                        // Import Logger dynamically to avoid circular dependencies
+                        const Logger = (await import('../utils/logger.js')).default;
+                        Logger.error("Error uploading attachment in support chat", err);
                         return null;
                     }
                 })
@@ -603,7 +605,9 @@ export const sendAdminResponse = async (req, res) => {
                         const url = await uploadCloudinary(file.buffer);
                         return url;
                     } catch (err) {
-                        console.error("Error uploading attachment:", err);
+                        // Import Logger dynamically to avoid circular dependencies
+                        const Logger = (await import('../utils/logger.js')).default;
+                        Logger.error("Error uploading attachment in support chat", err);
                         return null;
                     }
                 })

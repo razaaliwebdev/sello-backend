@@ -7,6 +7,7 @@ import {
     resetPassword,
     googleLogin,
     logout,
+    refreshToken,
     sendPhoneVerification,
     verifyPhone
 } from '../controllers/authController.js';
@@ -22,11 +23,12 @@ router.post("/register", upload.fields([
     { name: 'cnicFile', maxCount: 1 }
 ]), register);
 router.post("/login", login);
+router.post("/refresh-token", refreshToken); // Refresh token endpoint
 router.post("/forgot-password", forgotPassword);
 router.post("/verify-otp", verifyOtp);
 router.post("/reset-password", resetPassword);
 router.post("/google", googleLogin);
-router.post("/logout", logout);
+router.post("/logout", logout); // Can be used with or without auth
 
 // Protected Phone Verification Routes
 router.post("/phone/send-code", auth, sendPhoneVerification);

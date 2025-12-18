@@ -1,5 +1,6 @@
 import User from '../models/userModel.js';
 import Category from '../models/categoryModel.js';
+import RefreshToken from '../models/refreshTokenModel.js';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
@@ -17,14 +18,70 @@ import {
 } from '../utils/phoneVerification.js';
 
 /**
- * Generate JWT Token
+ * Generate Access Token (short-lived, 15 minutes)
+ */
+const generateAccessToken = (userId, email) => {
+    return jwt.sign(
+        { id: userId, email, type: 'access' },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m' }
+    );
+};
+
+/**
+ * Generate Refresh Token (long-lived, 7 days)
+ */
+const generateRefreshToken = () => {
+    return crypto.randomBytes(32).toString('hex');
+};
+
+/**
+ * Store Refresh Token in Database
+ */
+const storeRefreshToken = async (userId, refreshToken, userAgent, ipAddress) => {
+    try {
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7); // 7 days from now
+
+        await RefreshToken.create({
+            token: refreshToken,
+            userId: userId,
+            expiresAt: expiresAt,
+            userAgent: userAgent || null,
+            ipAddress: ipAddress || null,
+            isRevoked: false
+        });
+    } catch (error) {
+        // Handle duplicate token error (shouldn't happen with crypto.randomBytes, but handle gracefully)
+        if (error.code === 11000) {
+            Logger.warn('Duplicate refresh token generated (extremely rare)', { userId });
+            // Retry with a new token (though this should be extremely rare)
+            throw new Error('Token generation conflict. Please try again.');
+        }
+        throw error;
+    }
+};
+
+/**
+ * Generate both tokens and store refresh token
+ * Returns { accessToken, refreshToken }
+ */
+const generateTokens = async (userId, email, userAgent, ipAddress) => {
+    const accessToken = generateAccessToken(userId, email);
+    const refreshToken = generateRefreshToken();
+    
+    // Store refresh token in database
+    await storeRefreshToken(userId, refreshToken, userAgent, ipAddress);
+    
+    return { accessToken, refreshToken };
+};
+
+/**
+ * Legacy function for backward compatibility (now generates access token)
+ * @deprecated Use generateTokens instead
  */
 const generateToken = (userId, email) => {
-    return jwt.sign(
-        { id: userId, email },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
+    return generateAccessToken(userId, email);
 };
 
 /**
@@ -348,8 +405,42 @@ export const register = async (req, res) => {
         // Create user
         const user = await User.create(userData);
 
-        // Generate token
-        const token = generateToken(user._id, user.email);
+        // If dealer registration and not auto-approved, create admin notification
+        if (role === "dealer" && !autoApproveDealers) {
+            try {
+                const Notification = (await import('../models/notificationModel.js')).default;
+                const adminUsers = await User.find({ role: 'admin' }).select('_id');
+                const siteName = process.env.SITE_NAME || 'Sello';
+                const clientUrl = process.env.CLIENT_URL?.split(',')[0]?.trim() || 'http://localhost:3000';
+
+                for (const admin of adminUsers) {
+                    await Notification.create({
+                        title: 'New Dealer Registration',
+                        message: `${user.name} (${user.email}) has registered as a dealer. Business: ${userData.dealerInfo?.businessName || user.name}`,
+                        type: 'info',
+                        recipient: admin._id,
+                        actionUrl: `${clientUrl}/admin/dealers?userId=${user._id}`,
+                        actionText: 'Review Registration'
+                    });
+                }
+            } catch (notifError) {
+                Logger.error("Error creating admin notification for dealer registration", notifError, { userId: user._id, email: user.email });
+                // Don't fail registration if notification fails
+            }
+        }
+
+        // Generate both access and refresh tokens
+        const userAgent = req.headers['user-agent'] || null;
+        const ipAddress = req.ip || req.connection.remoteAddress || null;
+        const { accessToken, refreshToken } = await generateTokens(user._id, user.email, userAgent, ipAddress);
+
+        // Set access token in cookie as well (for compatibility)
+        res.cookie('token', accessToken, {
+            httpOnly: false, // Allow client-side access
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 15 * 60 * 1000 // 15 minutes (access token lifetime)
+        });
 
         // Return response (exclude sensitive data)
         return res.status(201).json({
@@ -366,7 +457,9 @@ export const register = async (req, res) => {
                     verified: user.verified,
                     isEmailVerified: user.isEmailVerified
                 },
-                token
+                token: accessToken, // For backward compatibility
+                accessToken: accessToken,
+                refreshToken: refreshToken
             }
         });
     } catch (error) {
@@ -458,18 +551,20 @@ export const login = async (req, res) => {
         user.lastLogin = new Date();
         await user.save({ validateBeforeSave: false });
 
-        // Generate token
-        const token = generateToken(user._id, user.email);
+        // Generate both access and refresh tokens
+        const userAgent = req.headers['user-agent'] || null;
+        const ipAddress = req.ip || req.connection.remoteAddress || null;
+        const { accessToken, refreshToken } = await generateTokens(user._id, user.email, userAgent, ipAddress);
 
-        // Set token in cookie as well (for compatibility)
-        res.cookie('token', token, {
+        // Set access token in cookie as well (for compatibility)
+        res.cookie('token', accessToken, {
             httpOnly: false, // Allow client-side access
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+            maxAge: 15 * 60 * 1000 // 15 minutes (access token lifetime)
         });
 
-        // Return response
+        // Return response with both tokens
         return res.status(200).json({
             success: true,
             message: "User logged in successfully.",
@@ -489,7 +584,9 @@ export const login = async (req, res) => {
                     permissions: user.permissions || {},
                     dealerInfo: user.dealerInfo || null
                 },
-                token
+                token: accessToken, // For backward compatibility
+                accessToken: accessToken,
+                refreshToken: refreshToken
             }
         });
     } catch (error) {
@@ -928,15 +1025,17 @@ export const googleLogin = async (req, res) => {
             });
         }
 
-        // Generate JWT token
-        const jwtToken = generateToken(user._id, user.email);
+        // Generate both access and refresh tokens
+        const userAgent = req.headers['user-agent'] || null;
+        const ipAddress = req.ip || req.connection.remoteAddress || null;
+        const { accessToken, refreshToken } = await generateTokens(user._id, user.email, userAgent, ipAddress);
 
-        // Set token in cookie as well (for compatibility)
-        res.cookie('token', jwtToken, {
+        // Set access token in cookie as well (for compatibility)
+        res.cookie('token', accessToken, {
             httpOnly: false, // Allow client-side access
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+            maxAge: 15 * 60 * 1000 // 15 minutes (access token lifetime)
         });
 
         return res.status(200).json({
@@ -955,7 +1054,9 @@ export const googleLogin = async (req, res) => {
                     adminRole: user.adminRole,
                     roleId: user.roleId
                 },
-                token: jwtToken
+                token: accessToken, // For backward compatibility
+                accessToken: accessToken,
+                refreshToken: refreshToken
             }
         });
     } catch (error) {
@@ -1004,8 +1105,32 @@ export const googleLogin = async (req, res) => {
  */
 export const logout = async (req, res) => {
     try {
-        // In a stateless JWT system, logout is handled client-side
-        // But we can add token blacklisting here if needed in the future
+        const refreshToken = req.body.refreshToken || req.query.refreshToken;
+        
+        // If refresh token is provided, revoke it
+        if (refreshToken) {
+            await RefreshToken.updateOne(
+                { token: refreshToken, isRevoked: false },
+                { 
+                    isRevoked: true, 
+                    revokedAt: new Date() 
+                }
+            );
+        } else if (req.user) {
+            // If user is authenticated, revoke all their refresh tokens (optional - can be commented out)
+            // This is useful for "logout from all devices" functionality
+            // await RefreshToken.updateMany(
+            //     { userId: req.user._id, isRevoked: false },
+            //     { 
+            //         isRevoked: true, 
+            //         revokedAt: new Date() 
+            //     }
+            // );
+        }
+
+        // Clear cookie
+        res.clearCookie('token');
+
         return res.status(200).json({
             success: true,
             message: "User logged out successfully."
@@ -1015,6 +1140,106 @@ export const logout = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to log out.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Refresh Access Token Controller
+ */
+export const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken: token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({
+                success: false,
+                message: "Refresh token is required."
+            });
+        }
+
+        // Find refresh token in database
+        const refreshTokenDoc = await RefreshToken.findOne({ 
+            token: token,
+            isRevoked: false
+        }).populate('userId', '-password -otp -otpExpiry');
+
+        if (!refreshTokenDoc) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid or expired refresh token."
+            });
+        }
+
+        // Check if token is expired (also handled by TTL index, but check here for immediate response)
+        const now = new Date();
+        if (refreshTokenDoc.expiresAt < now) {
+            // Mark as revoked (TTL will delete it, but mark revoked for immediate cleanup)
+            try {
+                refreshTokenDoc.isRevoked = true;
+                refreshTokenDoc.revokedAt = now;
+                await refreshTokenDoc.save();
+            } catch (saveError) {
+                // Token might already be deleted by TTL, ignore save error
+                Logger.debug('Token already expired/deleted by TTL', { tokenId: refreshTokenDoc._id });
+            }
+            
+            return res.status(401).json({
+                success: false,
+                message: "Refresh token has expired."
+            });
+        }
+
+        // Check if user still exists and is active
+        const user = refreshTokenDoc.userId;
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: "User associated with refresh token not found."
+            });
+        }
+
+        if (user.status === 'suspended' || user.status === 'inactive') {
+            // Revoke all tokens for suspended/inactive users
+            await RefreshToken.updateMany(
+                { userId: user._id, isRevoked: false },
+                { 
+                    isRevoked: true, 
+                    revokedAt: new Date() 
+                }
+            );
+            
+            return res.status(403).json({
+                success: false,
+                message: `Your account has been ${user.status}. Please contact support.`
+            });
+        }
+
+        // Generate new access token
+        const accessToken = generateAccessToken(user._id, user.email);
+
+        // Set new access token in cookie
+        res.cookie('token', accessToken, {
+            httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 15 * 60 * 1000 // 15 minutes
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Access token refreshed successfully.",
+            data: {
+                accessToken: accessToken,
+                token: accessToken // For backward compatibility
+            }
+        });
+    } catch (error) {
+        Logger.error("Refresh Token Error", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to refresh token.",
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

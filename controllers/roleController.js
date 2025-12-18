@@ -6,6 +6,7 @@ import sendEmail from '../utils/sendEmail.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import Logger from '../utils/logger.js';
 
 // Role presets based on requirements
 const ROLE_PRESETS = {
@@ -150,7 +151,7 @@ export const initializeRoles = async () => {
             }
         }
     } catch (error) {
-        console.error("Initialize Roles Error:", error.message);
+        Logger.error("Initialize Roles Error", error);
     }
 };
 
@@ -177,7 +178,7 @@ export const getAllRoles = async (req, res) => {
             data: roles
         });
     } catch (error) {
-        console.error("Get All Roles Error:", error.message);
+        Logger.error("Get All Roles Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -638,7 +639,7 @@ export const inviteUser = async (req, res) => {
                 emailSent: emailSent
             }, null, req);
         } catch (auditError) {
-            console.error("Audit log error (non-blocking):", auditError.message);
+            Logger.error("Audit log error (non-blocking)", auditError);
         }
 
         // Always include invite URL in response for manual sharing if needed

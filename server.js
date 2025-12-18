@@ -5,6 +5,10 @@ import { initializeSocket } from './socket/socketServer.js';
 import { initializeRoles } from './controllers/roleController.js';
 import Logger from './utils/logger.js';
 import mongoose from 'mongoose';
+import validateEnvVars from './utils/envValidator.js';
+
+// Validate environment variables before starting server
+validateEnvVars({ strict: process.env.NODE_ENV === 'production' });
 
 // Optional: Setup cron jobs for background tasks
 let cronJobs = null;
@@ -76,6 +80,7 @@ const startServer = () => {
             io = initializeSocket(server);
             app.set('io', io);
         } catch (socketError) {
+            Logger.error('Socket.io initialization error', socketError);
             console.error('Socket.io initialization error:', socketError);
             // Continue without socket.io if it fails
         }
@@ -118,11 +123,13 @@ connectDB().then(() => {
         try {
             initializeRoles();
         } catch (roleError) {
+            Logger.error('Role initialization error', roleError);
             console.error('Role initialization error:', roleError);
         }
     }
     startServer();
 }).catch((error) => {
+    Logger.error('DB connection error (server will start anyway)', error);
     console.error('DB connection error (server will start anyway):', error.message);
     // Start server even if DB connection fails
     startServer();

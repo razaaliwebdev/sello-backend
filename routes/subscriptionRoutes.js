@@ -9,7 +9,8 @@ import {
 import {
     createSubscriptionCheckout,
     createBoostCheckout,
-    stripeWebhook
+    stripeWebhook,
+    verifyPaymentSession
 } from '../controllers/paymentController.js';
 import { auth } from '../middlewares/authMiddleware.js';
 
@@ -32,6 +33,7 @@ router.get("/payment-history", getPaymentHistory);
 // Stripe checkout routes
 router.post("/checkout", createSubscriptionCheckout);
 router.post("/boost-checkout", createBoostCheckout);
+router.get("/verify-payment/:sessionId", verifyPaymentSession);
 
 export default router;
 

@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from 'cloudinary';
 import dotenv from 'dotenv';
+import Logger from './logger.js';
 
 dotenv.config();
 
@@ -54,7 +55,7 @@ export const uploadCloudinary = (fileBuffer, options = {}) => {
             uploadOptions,
             (error, result) => {
                 if (error) {
-                    console.error("Cloudinary upload error:", error);
+                    Logger.error("Cloudinary upload error", error);
                     return reject(error);
                 }
                 resolve(result.secure_url);
@@ -104,7 +105,10 @@ export const uploadOnCloudinary = async (filePath, options = {}) => {
             try {
                 fs.unlinkSync(filePath);
             } catch (err) {
-                console.warn("Warning: Failed to delete local file", err.message);
+                Logger.warn("Failed to delete local file after Cloudinary upload", { 
+                    filePath, 
+                    error: err.message 
+                });
             }
         }
 

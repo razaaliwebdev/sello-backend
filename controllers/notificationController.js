@@ -1,6 +1,7 @@
 import Notification from '../models/notificationModel.js';
 import User from '../models/userModel.js';
 import mongoose from 'mongoose';
+import sendEmail from '../utils/sendEmail.js';
 
 /**
  * Create Notification
@@ -224,6 +225,82 @@ export const createNotification = async (req, res) => {
             // Don't fail the request if socket emission fails
         }
 
+        // Optionally send email notifications (controlled by env flag)
+        // This keeps behavior safe in development and avoids accidental email blasts.
+        if (process.env.ENABLE_EMAIL_NOTIFICATIONS === 'true') {
+            try {
+                // Collect unique recipient IDs from created notifications
+                const recipientIds = Array.from(
+                    new Set(
+                        notifications
+                            .filter((n) => n.recipient)
+                            .map((n) => n.recipient.toString())
+                    )
+                );
+
+                if (recipientIds.length > 0) {
+                    const users = await User.find({
+                        _id: { $in: recipientIds }
+                    }).select('email name');
+
+                    const userMap = new Map(
+                        users.map((u) => [u._id.toString(), u])
+                    );
+
+                    const siteName = process.env.SITE_NAME || 'Sello';
+                    const clientUrl =
+                        process.env.CLIENT_URL?.split(',')[0]?.trim() ||
+                        'https://sello.ae';
+
+                    for (const notif of notifications) {
+                        if (!notif.recipient) continue;
+                        const user = userMap.get(notif.recipient.toString());
+                        if (!user?.email) continue;
+
+                        const subject = notif.title;
+                        const actionHref = notif.actionUrl
+                            ? `${clientUrl}${notif.actionUrl}`
+                            : null;
+
+                        const html = `
+                            <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+                                <h2 style="color:#111827;margin-bottom:8px;">${siteName} – ${notif.title}</h2>
+                                <p style="margin:0 0 12px 0;">Hi ${user.name || ''},</p>
+                                <p style="margin:0 0 16px 0;">${notif.message}</p>
+                                ${
+                                    actionHref
+                                        ? `<p style="margin:0 0 16px 0;">
+                                              <a href="${actionHref}" style="display:inline-block;padding:10px 18px;background:#F97316;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;">
+                                                  ${notif.actionText || 'View details'}
+                                              </a>
+                                           </p>`
+                                        : ''
+                                }
+                                <p style="font-size:12px;color:#6B7280;margin-top:24px;">
+                                    You are receiving this because you have an account on ${siteName}.
+                                </p>
+                            </div>
+                        `;
+
+                        try {
+                            await sendEmail(user.email, subject, html);
+                        } catch (emailError) {
+                            // Log and continue – email failures shouldn't break notification API
+                            console.error(
+                                `Notification email error for user ${user._id}:`,
+                                emailError.message
+                            );
+                        }
+                    }
+                }
+            } catch (emailBlockError) {
+                console.error(
+                    'Bulk notification email error:',
+                    emailBlockError.message
+                );
+            }
+        }
+
         return res.status(201).json({
             success: true,
             message: `Notification created and sent successfully to ${notifications.length} user(s).`,
@@ -352,7 +429,8 @@ export const getUserNotifications = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get User Notifications Error:", error.message);
+        const Logger = (await import('../utils/logger.js')).default;
+        Logger.error("Get User Notifications Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

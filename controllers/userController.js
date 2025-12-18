@@ -613,12 +613,58 @@ export const requestSeller = async (req, res) => {
 };
 
 /**
- * Request Dealer Status
+ * Request Dealer Status (Convert Profile to Dealer)
  */
 export const requestDealer = async (req, res) => {
     try {
-        const { businessName, businessLicense, businessAddress, businessPhone } = req.body;
+        const {
+            businessName,
+            businessLicense: businessLicenseNumber,
+            businessAddress,
+            businessPhone,
+            whatsappNumber,
+            country,
+            state,
+            city,
+            area,
+            vehicleTypes,
+            description,
+            website,
+            establishedYear,
+            employeeCount,
+            specialties,
+            languages,
+            paymentMethods,
+            services,
+            facebook,
+            instagram,
+            twitter,
+            linkedin
+        } = req.body;
+
         const userId = req.user._id;
+
+        // Validation
+        if (!businessName || !businessName.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "Business name is required."
+            });
+        }
+
+        if (!businessAddress || !businessAddress.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "Business address is required."
+            });
+        }
+
+        if (!businessPhone || !businessPhone.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "Business phone number is required."
+            });
+        }
 
         const user = await User.findById(userId);
         if (!user) {
@@ -635,30 +681,320 @@ export const requestDealer = async (req, res) => {
             });
         }
 
+        // Upload business license file if provided
+        let businessLicenseUrl = null;
+        if (req.files && req.files.businessLicense && req.files.businessLicense[0]) {
+            try {
+                businessLicenseUrl = await uploadCloudinary(req.files.businessLicense[0].buffer, {
+                    folder: "sello_dealers/licenses",
+                    removeExif: true,
+                    quality: 85,
+                    format: "auto"
+                });
+            } catch (uploadError) {
+                Logger.error("Business license upload error", uploadError, { userId });
+                return res.status(400).json({
+                    success: false,
+                    message: "Failed to upload business license. Please try again."
+                });
+            }
+        }
+
+        // Import required models
+        const Category = (await import('../models/categoryModel.js')).default;
+        const Settings = (await import('../models/settingsModel.js')).default;
+        const Notification = (await import('../models/notificationModel.js')).default;
+        const mongoose = (await import('mongoose')).default;
+
+        // Look up location category names from IDs if provided
+        let countryName = null;
+        let stateName = null;
+        let cityName = null;
+
+        if (country && mongoose.Types.ObjectId.isValid(country)) {
+            const countryCategory = await Category.findById(country);
+            if (countryCategory && countryCategory.subType === 'country') {
+                countryName = countryCategory.name;
+            }
+        }
+
+        if (state && mongoose.Types.ObjectId.isValid(state)) {
+            const stateCategory = await Category.findById(state);
+            if (stateCategory && stateCategory.subType === 'state') {
+                stateName = stateCategory.name;
+            }
+        }
+
+        if (city && mongoose.Types.ObjectId.isValid(city)) {
+            const cityCategory = await Category.findById(city);
+            if (cityCategory && cityCategory.subType === 'city') {
+                cityName = cityCategory.name;
+            }
+        }
+
+        // Build location string
+        const locationParts = [];
+        if (area) locationParts.push(area);
+        if (cityName) locationParts.push(cityName);
+        if (stateName) locationParts.push(stateName);
+        if (countryName) locationParts.push(countryName);
+        const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : businessAddress;
+
+        // Validate and format social media URLs
+        const validateUrl = (url, platform) => {
+            if (!url || !url.trim()) return null;
+            let urlStr = url.trim();
+            if (!urlStr.match(/^https?:\/\//i)) {
+                urlStr = `https://${urlStr}`;
+            }
+            try {
+                new URL(urlStr);
+                return urlStr;
+            } catch (e) {
+                Logger.warn(`Invalid ${platform} URL`, { url: urlStr, userId });
+                return null;
+            }
+        };
+
+        // Check if auto-approve dealers is enabled
+        const autoApproveDealersSetting = await Settings.findOne({ key: 'autoApproveDealers' });
+        const autoApproveDealers = autoApproveDealersSetting &&
+            (autoApproveDealersSetting.value === true ||
+                autoApproveDealersSetting.value === 'true' ||
+                autoApproveDealersSetting.value === 1 ||
+                autoApproveDealersSetting.value === '1');
+
+        // Parse JSON strings if they exist (for arrays)
+        let parsedSpecialties = [];
+        let parsedLanguages = [];
+        let parsedPaymentMethods = [];
+        let parsedServices = [];
+
+        try {
+            if (specialties) {
+                if (typeof specialties === 'string') {
+                    try {
+                        parsedSpecialties = JSON.parse(specialties);
+                    } catch {
+                        parsedSpecialties = specialties.split(',').map(s => s.trim()).filter(Boolean);
+                    }
+                } else if (Array.isArray(specialties)) {
+                    parsedSpecialties = specialties;
+                }
+            }
+        } catch (e) {
+            parsedSpecialties = [];
+        }
+
+        try {
+            if (languages) {
+                if (typeof languages === 'string') {
+                    try {
+                        parsedLanguages = JSON.parse(languages);
+                    } catch {
+                        parsedLanguages = languages.split(',').map(l => l.trim()).filter(Boolean);
+                    }
+                } else if (Array.isArray(languages)) {
+                    parsedLanguages = languages;
+                }
+            }
+        } catch (e) {
+            parsedLanguages = [];
+        }
+
+        try {
+            if (paymentMethods) {
+                if (typeof paymentMethods === 'string') {
+                    try {
+                        parsedPaymentMethods = JSON.parse(paymentMethods);
+                    } catch {
+                        parsedPaymentMethods = paymentMethods.split(',').map(p => p.trim()).filter(Boolean);
+                    }
+                } else if (Array.isArray(paymentMethods)) {
+                    parsedPaymentMethods = paymentMethods;
+                }
+            }
+        } catch (e) {
+            parsedPaymentMethods = [];
+        }
+
+        try {
+            if (services) {
+                if (typeof services === 'string') {
+                    try {
+                        parsedServices = JSON.parse(services);
+                    } catch {
+                        parsedServices = services.split(',').map(s => s.trim()).filter(Boolean);
+                    }
+                } else if (Array.isArray(services)) {
+                    parsedServices = services;
+                }
+            }
+        } catch (e) {
+            parsedServices = [];
+        }
+
+        // Update user role and dealer info
         user.role = 'dealer';
         user.isVerified = false;
-        user.dealerInfo = {
-            businessName,
-            businessLicense,
-            businessAddress,
-            businessPhone,
-            verified: false,
-            verifiedAt: null
-        };
+
+        // Initialize dealerInfo if it doesn't exist, or merge with existing
+        if (!user.dealerInfo) {
+            user.dealerInfo = {};
+        }
+
+        // Update dealer info with provided data
+        user.dealerInfo.businessName = businessName.trim();
+        user.dealerInfo.businessLicense = businessLicenseUrl || businessLicenseNumber || user.dealerInfo.businessLicense;
+        user.dealerInfo.businessAddress = fullLocation || businessAddress.trim();
+        user.dealerInfo.businessPhone = businessPhone.trim();
+        if (whatsappNumber) user.dealerInfo.whatsappNumber = whatsappNumber.trim();
+        if (country) user.dealerInfo.country = country;
+        if (countryName) user.dealerInfo.countryName = countryName;
+        if (state) user.dealerInfo.state = state;
+        if (stateName) user.dealerInfo.stateName = stateName;
+        if (city) user.dealerInfo.city = city;
+        if (cityName) user.dealerInfo.cityName = cityName;
+        if (area) user.dealerInfo.area = area.trim();
+        if (vehicleTypes) user.dealerInfo.vehicleTypes = vehicleTypes.trim();
+        if (description) user.dealerInfo.description = description.trim();
+        if (website) user.dealerInfo.website = validateUrl(website, 'website');
+        if (establishedYear) user.dealerInfo.establishedYear = parseInt(establishedYear);
+        if (employeeCount) user.dealerInfo.employeeCount = employeeCount;
+
+        // Social media
+        if (!user.dealerInfo.socialMedia) {
+            user.dealerInfo.socialMedia = {};
+        }
+        if (facebook) user.dealerInfo.socialMedia.facebook = validateUrl(facebook, 'facebook');
+        if (instagram) user.dealerInfo.socialMedia.instagram = validateUrl(instagram, 'instagram');
+        if (twitter) user.dealerInfo.socialMedia.twitter = validateUrl(twitter, 'twitter');
+        if (linkedin) user.dealerInfo.socialMedia.linkedin = validateUrl(linkedin, 'linkedin');
+
+        // Arrays
+        if (parsedSpecialties.length > 0) user.dealerInfo.specialties = parsedSpecialties;
+        if (parsedLanguages.length > 0) user.dealerInfo.languages = parsedLanguages;
+        if (parsedPaymentMethods.length > 0) user.dealerInfo.paymentMethods = parsedPaymentMethods;
+        if (parsedServices.length > 0) user.dealerInfo.services = parsedServices;
+
+        // Set verification status based on auto-approve setting
+        user.dealerInfo.verified = autoApproveDealers;
+        user.dealerInfo.verifiedAt = autoApproveDealers ? new Date() : null;
+
+        // Also update phone if not set
+        if (!user.phone && businessPhone) {
+            user.phone = businessPhone.trim();
+        }
 
         await user.save();
 
+        // Create admin notification for new dealer request (if not auto-approved)
+        if (!autoApproveDealers) {
+            try {
+                const adminUsers = await User.find({ role: 'admin' }).select('_id');
+                const siteName = process.env.SITE_NAME || 'Sello';
+                const clientUrl = process.env.CLIENT_URL?.split(',')[0]?.trim() || 'http://localhost:3000';
+
+                for (const admin of adminUsers) {
+                    await Notification.create({
+                        title: 'New Dealer Registration Request',
+                        message: `${user.name} (${user.email}) has requested dealer status. Business: ${businessName.trim()}`,
+                        type: 'info',
+                        recipient: admin._id,
+                        actionUrl: `${clientUrl}/admin/dealers?userId=${user._id}`,
+                        actionText: 'Review Request'
+                    });
+                }
+
+                // Socket notification will be handled by the notification system when admins connect
+            } catch (notifError) {
+                Logger.error("Error creating admin notification for dealer request", notifError, { userId, dealerName: businessName });
+                // Don't fail the request if notification fails
+            }
+        }
+
+        // Send email notification to dealer
+        try {
+            const sendEmail = (await import('../utils/sendEmail.js')).default;
+            const siteName = process.env.SITE_NAME || 'Sello';
+            const clientUrl = process.env.CLIENT_URL?.split(',')[0]?.trim() || 'http://localhost:3000';
+
+            const emailSubject = autoApproveDealers
+                ? `Welcome! Your Dealer Account is Verified - ${siteName}`
+                : `Dealer Registration Request Received - ${siteName}`;
+
+            const emailHtml = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>${emailSubject}</title>
+                </head>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <div style="background-color: #FFA602; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h1 style="margin: 0; font-size: 24px;">${autoApproveDealers ? '🎉 Dealer Account Verified!' : 'Dealer Registration Request Received'}</h1>
+                    </div>
+                    <div style="background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
+                        <p style="font-size: 16px; margin-top: 0;">Hello <strong>${user.name}</strong>,</p>
+                        <p style="font-size: 16px;">
+                            ${autoApproveDealers
+                    ? `Congratulations! Your dealer account for <strong>${businessName.trim()}</strong> has been automatically verified and activated. You can now start posting listings with dealer benefits.`
+                    : `Thank you for requesting dealer status for <strong>${businessName.trim()}</strong>. Your request has been received and is pending admin review. You will be notified once your account is verified.`}
+                        </p>
+                        ${!autoApproveDealers ? `
+                        <p style="font-size: 14px; color: #666;">
+                            <strong>What happens next?</strong><br>
+                            • Our admin team will review your business information<br>
+                            • Verification typically takes 1-3 business days<br>
+                            • You'll receive an email notification once verified<br>
+                            • Verified dealers get priority listing placement and enhanced visibility
+                        </p>
+                        ` : ''}
+                        <div style="margin: 30px 0; text-align: center;">
+                            <a href="${clientUrl}/dealer-dashboard" style="background-color: #FFA602; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                                ${autoApproveDealers ? 'Go to Dealer Dashboard' : 'View My Profile'}
+                            </a>
+                        </div>
+                        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+                        <p style="color: #999; font-size: 12px; margin-bottom: 0;">
+                            If you have any questions, please contact our support team.
+                        </p>
+                    </div>
+                </body>
+                </html>
+            `;
+
+            await sendEmail(user.email, emailSubject, emailHtml);
+        } catch (emailError) {
+            Logger.error("Error sending dealer registration email", emailError, { userId, email: user.email });
+            // Don't fail the request if email fails
+        }
+
+        Logger.info("Dealer request processed", {
+            userId: user._id,
+            email: user.email,
+            businessName: businessName.trim(),
+            autoApproved: autoApproveDealers
+        });
+
         return res.status(200).json({
             success: true,
-            message: "Dealer request submitted successfully. Pending admin verification.",
+            message: autoApproveDealers
+                ? "Dealer account created and verified successfully!"
+                : "Dealer request submitted successfully. Pending admin verification.",
             data: {
                 role: user.role,
                 isVerified: user.isVerified,
-                dealerInfo: user.dealerInfo
+                dealerInfo: {
+                    ...user.dealerInfo.toObject(),
+                    verified: user.dealerInfo.verified,
+                    verifiedAt: user.dealerInfo.verifiedAt
+                }
             }
         });
     } catch (error) {
-        console.error("Request Dealer Error:", error.message);
+        Logger.error("Request Dealer Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/userModel.js';
+import Logger from '../utils/logger.js';
 
 /**
  * Authentication Middleware
@@ -29,6 +30,15 @@ export const auth = async (req, res, next) => {
         }
 
         // Verify token
+        // Check if JWT_SECRET is configured (should be caught at startup, but check here as fallback)
+        if (!process.env.JWT_SECRET) {
+            Logger.error('JWT_SECRET not configured in auth middleware');
+            return res.status(500).json({
+                success: false,
+                message: "Server configuration error. Please contact support."
+            });
+        }
+
         let decoded;
         try {
             decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -74,6 +84,7 @@ export const auth = async (req, res, next) => {
         req.user = user;
         next();
     } catch (error) {
+        Logger.error("Auth Middleware Error", error);
         console.error("Auth Middleware Error:", error.message);
         return res.status(500).json({
             success: false,

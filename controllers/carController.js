@@ -1186,7 +1186,7 @@ export const markCarAsSold = async (req, res) => {
  */
 export const getCarCountsByMake = async (req, res) => {
     try {
-        // Count active, non-sold cars grouped by make
+        // Count active, non-sold cars grouped by make (case-insensitive)
         const counts = await Car.aggregate([
             {
                 $match: {
@@ -1198,14 +1198,15 @@ export const getCarCountsByMake = async (req, res) => {
             },
             {
                 $group: {
-                    _id: "$make",
-                    count: { $sum: 1 }
+                    _id: { $toLower: { $trim: { input: "$make" } } }, // Group by lowercase make name
+                    count: { $sum: 1 },
+                    originalMake: { $first: { $trim: { input: "$make" } } } // Keep original case for reference
                 }
             },
             {
                 $project: {
                     _id: 0,
-                    make: { $trim: { input: "$_id" } },
+                    make: "$_id", // This is now lowercase
                     count: 1
                 }
             },
@@ -1214,11 +1215,10 @@ export const getCarCountsByMake = async (req, res) => {
             }
         ]);
 
-        // Convert to object for easy lookup
+        // Convert to object for easy lookup (already normalized to lowercase)
         const countsMap = {};
         counts.forEach(item => {
-            const makeName = item.make.trim();
-            countsMap[makeName] = item.count;
+            countsMap[item.make] = item.count;
         });
 
         return res.status(200).json({

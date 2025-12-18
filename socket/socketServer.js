@@ -3,6 +3,8 @@ import jwt from 'jsonwebtoken';
 import User from '../models/userModel.js';
 import { Chat, Message } from '../models/chatModel.js';
 import { generateChatbotResponse } from '../utils/chatbot.js';
+import sendEmail from '../utils/sendEmail.js';
+import Logger from '../utils/logger.js';
 
 // Store active users and their socket connections
 const activeUsers = new Map(); // userId -> socketId
@@ -44,7 +46,7 @@ export const initializeSocket = (server) => {
                 socket.handshake.query?.token;
 
             if (!token) {
-                console.log('Socket connection attempt without token');
+                Logger.warn('Socket connection attempt without token', { socketId: socket.id });
                 return next(new Error('Authentication error: No token provided'));
             }
 
@@ -60,17 +62,17 @@ export const initializeSocket = (server) => {
                 socket.user = user;
                 next();
             } catch (jwtError) {
-                console.error('JWT verification error:', jwtError.message);
+                Logger.error('JWT verification error in socket', jwtError, { socketId: socket.id });
                 return next(new Error('Authentication error: Invalid token'));
             }
         } catch (error) {
-            console.error('Socket auth error:', error.message);
+            Logger.error('Socket auth error', error, { socketId: socket.id });
             next(new Error('Authentication error: ' + error.message));
         }
     });
 
     io.on('connection', (socket) => {
-        console.log(`User connected: ${socket.userId}`);
+        Logger.info(`User connected via socket`, { userId: socket.userId, socketId: socket.id });
 
         // Store user's socket connection
         activeUsers.set(socket.userId, socket.id);
@@ -107,9 +109,9 @@ export const initializeSocket = (server) => {
                 chats.forEach(chat => {
                     socket.join(`chat:${chat._id}`);
                 });
-                console.log(`User ${socket.userId} joined ${chats.length} chat rooms`);
+                Logger.info(`User joined chat rooms`, { userId: socket.userId, chatCount: chats.length });
             } catch (error) {
-                console.error('Error joining chats:', error);
+                Logger.error('Error joining chats', error, { userId: socket.userId });
             }
         });
 
@@ -117,13 +119,13 @@ export const initializeSocket = (server) => {
         socket.on('join-chat', async (chatId) => {
             try {
                 if (!chatId) {
-                    console.error('No chatId provided to join-chat');
+                    Logger.warn('No chatId provided to join-chat', { userId: socket.userId });
                     return;
                 }
 
                 const chat = await Chat.findById(chatId);
                 if (!chat) {
-                    console.error('Chat not found:', chatId);
+                    Logger.warn('Chat not found', { chatId, userId: socket.userId });
                     return;
                 }
 
@@ -138,10 +140,10 @@ export const initializeSocket = (server) => {
                     socket.emit('joined-chat', chatId);
                     console.log(`User ${socket.userId} joined chat ${chatId}`);
                 } else {
-                    console.error('User not a participant in chat:', chatId);
+                    Logger.warn('User not a participant in chat', { chatId, userId: socket.userId });
                 }
             } catch (error) {
-                console.error('Error joining chat:', error);
+                Logger.error('Error joining chat', error, { chatId, userId: socket.userId });
             }
         });
 
@@ -245,37 +247,120 @@ export const initializeSocket = (server) => {
                     chatId: chatId
                 });
 
-                // Send notification to seller if individual sent message in car chat
-                if (chat.chatType === 'car' && socket.user.role === 'individual') {
-                    try {
-                        const Car = (await import('../models/carModel.js')).default;
-                        const Notification = (await import('../models/notificationModel.js')).default;
+                // Create and emit user notifications for chat participants (buyer / seller / dealer)
+                try {
+                    const Notification = (await import('../models/notificationModel.js')).default;
 
-                        const car = await Car.findById(chat.car).populate("postedBy", "name email role");
-                        const seller = car?.postedBy;
+                    const senderId = socket.userId.toString();
+                    const participantIds = chat.participants.map((p) => p.toString());
+                    const recipientIds = participantIds.filter((id) => id !== senderId);
 
-                        if (seller && seller._id.toString() !== socket.userId.toString()) {
-                            // Create notification
-                            await Notification.create({
-                                title: "New Message",
-                                message: `${socket.user.name} sent you a message about "${car?.title || 'your listing'}"`,
-                                type: "info",
-                                recipient: seller._id,
-                                actionUrl: `/seller/chats?chatId=${chatId}`,
-                                actionText: "View Chat"
-                            });
-
-                            // Emit notification via socket
-                            io.to(`user:${seller._id}`).emit('new-notification', {
-                                title: "New Message",
-                                message: `${socket.user.name} sent you a message`,
-                                chatId: chatId,
-                                carId: car?._id
-                            });
+                    if (recipientIds.length > 0) {
+                        let car = null;
+                        if (chat.chatType === 'car' && chat.car) {
+                            const Car = (await import('../models/carModel.js')).default;
+                            car = await Car.findById(chat.car).populate('postedBy', 'name email role');
                         }
-                    } catch (notifError) {
-                        console.error("Error creating notification:", notifError);
+
+                        // Load recipient users (for role / email)
+                        const recipients = await User.find({ _id: { $in: recipientIds } }).select('name email role');
+                        const recipientsMap = new Map(
+                            recipients.map((u) => [u._id.toString(), u])
+                        );
+
+                        const siteName = process.env.SITE_NAME || 'Sello';
+                        const clientUrl =
+                            process.env.CLIENT_URL?.split(',')[0]?.trim() ||
+                            'https://sello.ae';
+                        const emailEnabled =
+                            process.env.ENABLE_EMAIL_NOTIFICATIONS === 'true';
+
+                        for (const recipientId of recipientIds) {
+                            const recipientUser = recipientsMap.get(recipientId);
+                            if (!recipientUser) continue;
+
+                            // Skip admin system notifications here – focus on buyer/seller/dealer
+                            if (recipientUser.role === 'admin') continue;
+
+                            let title = 'New Message';
+                            let messageText = '';
+                            let actionUrl = '';
+
+                            if (chat.chatType === 'car') {
+                                const listingTitle = car?.title || 'your listing';
+
+                                // If this recipient is the listing owner (seller/dealer)
+                                const isListingOwner =
+                                    car?.postedBy &&
+                                    car.postedBy._id.toString() === recipientId;
+
+                                messageText = `${socket.user.name} sent you a message about "${listingTitle}"`;
+
+                                // Seller/dealer sees seller chats page, buyers see generic chats
+                                if (isListingOwner) {
+                                    actionUrl = `/seller/chats?chatId=${chatId}`;
+                                } else {
+                                    actionUrl = `/chats?chatId=${chatId}`;
+                                }
+                            } else {
+                                // Support chat
+                                messageText = `${socket.user.name} sent you a support message`;
+                                actionUrl = `/support?chatId=${chatId}`;
+                            }
+
+                            // Create Notification document
+                            await Notification.create({
+                                title,
+                                message: messageText,
+                                type: 'info',
+                                recipient: recipientId,
+                                actionUrl,
+                                actionText: 'View Chat'
+                            });
+
+                            // Emit in-app notification via socket
+                            io.to(`user:${recipientId}`).emit('new-notification', {
+                                title,
+                                message: messageText,
+                                chatId,
+                                carId: car?._id || null,
+                                actionUrl
+                            });
+
+                            // Optional: email notification for chat messages
+                            if (emailEnabled && recipientUser.email) {
+                                const emailSubject = `${siteName} – ${title}`;
+                                const emailActionHref = `${clientUrl}${actionUrl}`;
+
+                                const emailHtml = `
+                                    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+                                        <h2 style="color:#111827;margin-bottom:8px;">${siteName} – ${title}</h2>
+                                        <p style="margin:0 0 12px 0;">Hi ${recipientUser.name || ''},</p>
+                                        <p style="margin:0 0 16px 0;">${messageText}</p>
+                                        <p style="margin:0 0 16px 0;">
+                                            <a href="${emailActionHref}" style="display:inline-block;padding:10px 18px;background:#F97316;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;">
+                                                View chat
+                                            </a>
+                                        </p>
+                                        <p style="font-size:12px;color:#6B7280;margin-top:24px;">
+                                            You are receiving this because you have an account on ${siteName}.
+                                        </p>
+                                    </div>
+                                `;
+
+                                try {
+                                    await sendEmail(recipientUser.email, emailSubject, emailHtml);
+                                } catch (emailError) {
+                                    console.error(
+                                        `Chat notification email error for user ${recipientUser._id}:`,
+                                        emailError.message
+                                    );
+                                }
+                            }
+                        }
                     }
+                } catch (notifError) {
+                    console.error('Error creating chat notifications:', notifError);
                 }
 
                 // Try chatbot response only for support chats (not car chats)

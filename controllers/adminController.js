@@ -1131,6 +1131,7 @@ export const verifyDealer = async (req, res) => {
         // Otherwise, use the provided verified value
         const shouldVerify = autoApproveDealers ? true : (verified === true || verified === 'true');
 
+        const wasVerified = user.dealerInfo?.verified || false;
         user.dealerInfo.verified = shouldVerify;
         user.dealerInfo.verifiedAt = shouldVerify ? new Date() : null;
 
@@ -1138,6 +1139,61 @@ export const verifyDealer = async (req, res) => {
 
         // Return updated user with populated dealerInfo
         await user.populate('dealerInfo');
+
+        // Send email notification if dealer was just verified (not previously verified)
+        if (shouldVerify && !wasVerified) {
+            try {
+                const sendEmail = (await import('../utils/sendEmail.js')).default;
+                const siteName = process.env.SITE_NAME || 'Sello';
+                const clientUrl = process.env.CLIENT_URL?.split(',')[0]?.trim() || 'http://localhost:3000';
+
+                const emailSubject = `🎉 Your Dealer Account is Now Verified - ${siteName}`;
+                const emailHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <title>${emailSubject}</title>
+                    </head>
+                    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                        <div style="background-color: #FFA602; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                            <h1 style="margin: 0; font-size: 24px;">🎉 Dealer Account Verified!</h1>
+                        </div>
+                        <div style="background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
+                            <p style="font-size: 16px; margin-top: 0;">Hello <strong>${user.name}</strong>,</p>
+                            <p style="font-size: 16px;">
+                                Great news! Your dealer account for <strong>${user.dealerInfo?.businessName || 'your business'}</strong> has been verified by our admin team.
+                            </p>
+                            <p style="font-size: 16px;">
+                                As a verified dealer, you now have access to:
+                            </p>
+                            <ul style="font-size: 15px; line-height: 2;">
+                                <li>✅ Dealer dashboard with advanced analytics</li>
+                                <li>✅ Priority listing placement</li>
+                                <li>✅ Enhanced visibility in search results</li>
+                                <li>✅ Access to dealer-specific features</li>
+                            </ul>
+                            <div style="margin: 30px 0; text-align: center;">
+                                <a href="${clientUrl}/dealer-dashboard" style="background-color: #FFA602; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                                    Go to Dealer Dashboard
+                                </a>
+                            </div>
+                            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+                            <p style="color: #999; font-size: 12px; margin-bottom: 0;">
+                                If you have any questions, please contact our support team.
+                            </p>
+                        </div>
+                    </body>
+                    </html>
+                `;
+
+                await sendEmail(user.email, emailSubject, emailHtml);
+            } catch (emailError) {
+                Logger.error("Error sending dealer verification email", emailError, { userId: user._id, email: user.email });
+                // Don't fail the verification if email fails
+            }
+        }
 
         return res.status(200).json({
             success: true,

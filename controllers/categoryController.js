@@ -1,6 +1,7 @@
 import Category from '../models/categoryModel.js';
 import mongoose from 'mongoose';
 import { uploadCloudinary } from '../utils/cloudinary.js';
+import Logger from '../utils/logger.js';
 
 /**
  * Create Category
@@ -30,7 +31,7 @@ export const createCategory = async (req, res) => {
             try {
                 imageUrl = await uploadCloudinary(req.file.buffer);
             } catch (error) {
-                console.error("Error uploading image:", error);
+                Logger.error("Error uploading category image", error);
                 return res.status(500).json({
                     success: false,
                     message: "Failed to upload image."
@@ -166,7 +167,7 @@ export const createCategory = async (req, res) => {
             data: category
         });
     } catch (error) {
-        console.error("Create Category Error:", error.message);
+        Logger.error("Create Category Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -199,7 +200,7 @@ export const getAllCategories = async (req, res) => {
             data: categories
         });
     } catch (error) {
-        console.error("Get All Categories Error:", error.message);
+        Logger.error("Get All Categories Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -238,7 +239,7 @@ export const getCategoryById = async (req, res) => {
             data: category
         });
     } catch (error) {
-        console.error("Get Category Error:", error.message);
+        Logger.error("Get Category Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -268,7 +269,7 @@ export const updateCategory = async (req, res) => {
             try {
                 imageUrl = await uploadCloudinary(req.file.buffer);
             } catch (error) {
-                console.error("Error uploading image:", error);
+                Logger.error("Error uploading category image", error);
                 return res.status(500).json({
                     success: false,
                     message: "Failed to upload image."
@@ -388,7 +389,7 @@ export const updateCategory = async (req, res) => {
             data: category
         });
     } catch (error) {
-        console.error("Update Category Error:", error.message);
+        Logger.error("Update Category Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -433,7 +434,7 @@ export const deleteCategory = async (req, res) => {
             message: "Category deleted successfully."
         });
     } catch (error) {
-        console.error("Delete Category Error:", error.message);
+        Logger.error("Delete Category Error", error);
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",

@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import Logger from './logger.js';
 
 const sendEmail = async (to, subject, html) => {
     // Validate email configuration
@@ -20,7 +21,7 @@ const sendEmail = async (to, subject, html) => {
         
         // In production, throw error
         const errorMsg = `Email configuration is missing. Required environment variables: ${missingVars.join(', ')}`;
-        console.error("❌ SMTP Configuration Error:", errorMsg);
+        Logger.error('SMTP Configuration Error', new Error(errorMsg), { missingVars });
         throw new Error(errorMsg);
     }
 

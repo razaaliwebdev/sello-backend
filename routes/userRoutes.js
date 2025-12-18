@@ -45,6 +45,8 @@ router.post("/report", createReport);
 
 // Seller & Dealer Routes
 router.post("/request-seller", requestSeller);
-router.post("/request-dealer", requestDealer);
+router.post("/request-dealer", upload.fields([
+    { name: 'businessLicense', maxCount: 1 }
+]), requestDealer);
 
 export default router;
