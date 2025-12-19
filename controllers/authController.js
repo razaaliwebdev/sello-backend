@@ -716,16 +716,19 @@ export const forgotPassword = async (req, res) => {
                 user.otpExpiry = null;
                 await user.save({ validateBeforeSave: false });
 
-                let errorMessage = "Failed to send OTP. Please try again later.";
-                if (emailError.message.includes("SMTP")) {
-                    errorMessage = "Email service connection failed. Please try again later.";
-                } else if (emailError.message.includes("authentication") || emailError.message.includes("Invalid login")) {
-                    errorMessage = "Email service authentication failed. Please check SMTP credentials.";
-                } else if (emailError.message.includes("ECONNREFUSED") || emailError.message.includes("timeout")) {
-                    errorMessage = "Could not connect to email server. Please try again later.";
+                // Pass the actual error message to the client
+                let errorMessage = emailError.message || "Failed to send OTP.";
+                let statusCode = 500;
+                
+                // If it's the specific App Password error, make sure it's clear and return 502
+                if (emailError.message.includes("App Password") || emailError.message.includes("authentication failed")) {
+                   errorMessage = "Email failed: " + emailError.message;
+                   statusCode = 502; // Bad Gateway (Upstream error)
+                } else if (emailError.message.includes("SMTP")) {
+                    statusCode = 500; // Internal Server Error
                 }
 
-                return res.status(500).json({
+                return res.status(statusCode).json({
                     success: false,
                     message: errorMessage,
                     error: isDevelopment ? emailError.message : undefined

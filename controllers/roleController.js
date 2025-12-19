@@ -1,6 +1,7 @@
 import Role from '../models/roleModel.js';
 import User from '../models/userModel.js';
 import Invite from '../models/inviteModel.js';
+import Notification from '../models/notificationModel.js';
 import { createAuditLog } from '../utils/auditLogger.js';
 import sendEmail from '../utils/sendEmail.js';
 import bcrypt from 'bcrypt';
@@ -640,6 +641,32 @@ export const inviteUser = async (req, res) => {
             }, null, req);
         } catch (auditError) {
             Logger.error("Audit log error (non-blocking)", auditError);
+        }
+
+        // Create in-app notification for the admin
+        try {
+            const notifMessage = emailSent && actualEmailSent
+                ? `Invitation sent to ${email} as ${role}`
+                : `Invitation created for ${email}. Email failed to send.`;
+                
+            const notifType = emailSent && actualEmailSent ? 'success' : 'warning';
+            
+            const notification = await Notification.create({
+                title: "User Invited",
+                message: notifMessage,
+                type: notifType,
+                recipient: req.user._id, // Notify the admin who performed the action
+                actionUrl: `/admin/settings?tab=users`,
+                actionText: "View Users"
+            });
+            
+            // Emit socket event to the admin immediately
+            const io = req.app.get('io');
+            if (io) {
+                io.to(`user:${req.user._id}`).emit('new-notification', notification);
+            }
+        } catch (notifError) {
+            console.error("Notification creation error:", notifError);
         }
 
         // Always include invite URL in response for manual sharing if needed

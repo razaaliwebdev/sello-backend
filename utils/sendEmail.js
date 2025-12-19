@@ -25,13 +25,15 @@ const sendEmail = async (to, subject, html) => {
         throw new Error(errorMsg);
     }
 
+    const emailUser = process.env.SMTP_MAIL?.match(/<(.+)>/)?.[1] || process.env.SMTP_MAIL;
+
     const transporter = nodemailer.createTransport(
         {
             host: process.env.SMTP_HOST,
             port: parseInt(process.env.SMTP_PORT) || 587,
             secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
             auth: {
-                user: process.env.SMTP_MAIL,
+                user: emailUser,
                 pass: process.env.SMTP_PASSWORD
             },
             tls: {
@@ -44,11 +46,24 @@ const sendEmail = async (to, subject, html) => {
     try {
         await transporter.verify();
     } catch (verifyError) {
+        if (verifyError.responseCode === 535 || verifyError.message.includes("Invalid login")) {
+            console.error("\n\n========================================================");
+            console.error("CRITICAL SMTP ERROR: GMAIL AUTHENTICATION FAILED (535)");
+            console.error("--------------------------------------------------------");
+            console.error("Your Google Password was rejected.");
+            console.error("You MUST use a Gmail App Password.");
+            console.error("1. Enable 2-Step Verification on Google Account");
+            console.error("2. Generating App Password");
+            console.error("3. Update SMTP_PASSWORD in .env");
+            console.error("See FIX_EMAIL_INSTRUCTIONS.md");
+            console.error("========================================================\n\n");
+            throw new Error("SMTP Authentication Failed: Invalid Password. Use an App Password.");
+        }
         throw new Error("SMTP server configuration is invalid: " + verifyError.message);
     }
 
     const mailOptions = {
-        from: `"${process.env.SITE_NAME || 'Sello'}" <${process.env.SMTP_MAIL}>`,
+        from: `"${process.env.SITE_NAME || 'Sello'}" <${emailUser}>`,
         to: to,
         subject: subject,
         html: html
@@ -61,8 +76,18 @@ const sendEmail = async (to, subject, html) => {
         
         // Provide more specific error messages
         let errorMessage = "Failed to send email";
-        if (sendError.code === 'EAUTH') {
+        if (sendError.code === 'EAUTH' || sendError.responseCode === 535) {
             errorMessage = "SMTP authentication failed. Please check your email credentials.";
+            console.error("\n\n========================================================");
+            console.error("CRITICAL EMAIL ERROR: GMAIL AUTHENTICATION FAILED (535)");
+            console.error("--------------------------------------------------------");
+            console.error("You are likely using your Login Password instead of an App Password.");
+            console.error("Google requires an App Password for SMTP.");
+            console.error("1. Go to Google Account > Security > 2-Step Verification > App Passwords");
+            console.error("2. Generate a new password");
+            console.error("3. Update SMTP_PASSWORD in server/.env");
+            console.error("See FIX_EMAIL_INSTRUCTIONS.md for details.");
+            console.error("========================================================\n\n");
         } else if (sendError.code === 'ECONNECTION') {
             errorMessage = "Could not connect to SMTP server. Please check SMTP_HOST and SMTP_PORT.";
         } else if (sendError.code === 'ETIMEDOUT') {
