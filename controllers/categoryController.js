@@ -15,7 +15,7 @@ export const createCategory = async (req, res) => {
             });
         }
 
-        const { name, description, image, type, subType, parentCategory, order, isActive } = req.body;
+        const { name, description, image, type, subType, parentCategory, order, isActive, vehicleType } = req.body;
 
 
         if (!name || !type) {
@@ -45,6 +45,17 @@ export const createCategory = async (req, res) => {
                 success: false,
                 message: "Invalid subType for car category. Must be 'make', 'model', or 'year'."
             });
+        }
+
+        // Validate vehicleType for car categories
+        if (type === 'car' && subType && ['make', 'model', 'year'].includes(subType)) {
+            const validVehicleTypes = ["Car", "Bus", "Truck", "Van", "Bike", "E-bike"];
+            if (!vehicleType || !validVehicleTypes.includes(vehicleType)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `vehicleType is required for car categories. Must be one of: ${validVehicleTypes.join(", ")}`
+                });
+            }
         }
 
         // Validate subType for location categories
@@ -129,22 +140,31 @@ export const createCategory = async (req, res) => {
                         message: "Model categories must have a make category as parent."
                     });
                 }
+                // Ensure parent make has the same vehicleType
+                if (vehicleType && parent.vehicleType !== vehicleType) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Model vehicle type (${vehicleType}) must match parent brand vehicle type (${parent.vehicleType || 'none'}).`
+                    });
+                }
             }
         }
 
         // Generate slug from name
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-        // Check if category already exists (considering type, subType, and parent)
-        const query = { slug, type };
+        // Check if category already exists (considering type, subType, vehicleType, and parent)
+        // Use name instead of slug for better duplicate detection
+        const query = { name: name.trim(), type };
         if (subType) query.subType = subType;
+        if (vehicleType) query.vehicleType = vehicleType;
         if (parentCategory) query.parentCategory = parentCategory;
         
         const existingCategory = await Category.findOne(query);
         if (existingCategory) {
             return res.status(409).json({
                 success: false,
-                message: "Category with this name already exists."
+                message: `Category "${name.trim()}" already exists${vehicleType ? ` for ${vehicleType}` : ''}.`
             });
         }
 
@@ -155,6 +175,7 @@ export const createCategory = async (req, res) => {
             image: imageUrl,
             type,
             subType: subType || null,
+            vehicleType: (type === 'car' && vehicleType) ? vehicleType : null,
             parentCategory: parentCategory || null,
             order: order || 0,
             isActive: isActive !== undefined ? isActive === 'true' || isActive === true : true,
@@ -181,17 +202,18 @@ export const createCategory = async (req, res) => {
  */
 export const getAllCategories = async (req, res) => {
     try {
-        const { type, subType, parentCategory, isActive } = req.query;
+        const { type, subType, parentCategory, isActive, vehicleType } = req.query;
 
         const query = {};
         if (type) query.type = type;
         if (subType) query.subType = subType;
         if (parentCategory) query.parentCategory = parentCategory;
         if (isActive !== undefined) query.isActive = isActive === 'true';
+        if (vehicleType) query.vehicleType = vehicleType;
 
         const categories = await Category.find(query)
             .populate("createdBy", "name email")
-            .populate("parentCategory", "name slug")
+            .populate("parentCategory", "name slug vehicleType")
             .sort({ order: 1, createdAt: -1 });
 
         return res.status(200).json({
@@ -261,7 +283,7 @@ export const updateCategory = async (req, res) => {
         }
 
         const { categoryId } = req.params;
-        const { name, description, image, subType, parentCategory, isActive, order } = req.body;
+        const { name, description, image, subType, parentCategory, isActive, order, vehicleType } = req.body;
 
         // Handle image upload if new file is provided
         let imageUrl = image;
@@ -320,6 +342,16 @@ export const updateCategory = async (req, res) => {
             }
             category.subType = subType;
         }
+        if (vehicleType !== undefined && category.type === 'car') {
+            const validVehicleTypes = ["Car", "Bus", "Truck", "Van", "Bike", "E-bike"];
+            if (vehicleType && !validVehicleTypes.includes(vehicleType)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid vehicleType. Must be one of: ${validVehicleTypes.join(", ")}`
+                });
+            }
+            category.vehicleType = vehicleType || null;
+        }
         if (parentCategory !== undefined) {
             if (parentCategory && !mongoose.Types.ObjectId.isValid(parentCategory)) {
                 return res.status(400).json({
@@ -373,6 +405,14 @@ export const updateCategory = async (req, res) => {
                             message: "Model categories must have a make category as parent."
                         });
                     }
+                    // Ensure parent make has the same vehicleType
+                    const currentVehicleType = vehicleType !== undefined ? vehicleType : category.vehicleType;
+                    if (currentVehicleType && parent.vehicleType !== currentVehicleType) {
+                        return res.status(400).json({
+                            success: false,
+                            message: `Model vehicle type (${currentVehicleType}) must match parent brand vehicle type (${parent.vehicleType || 'none'}).`
+                        });
+                    }
                 }
             }
 
@@ -380,6 +420,26 @@ export const updateCategory = async (req, res) => {
         }
         if (isActive !== undefined) category.isActive = isActive;
         if (order !== undefined) category.order = order;
+
+        // Check for duplicates before saving (if name or vehicleType changed)
+        if (name !== undefined || vehicleType !== undefined) {
+            const checkQuery = { 
+                name: category.name.trim(), 
+                type: category.type,
+                _id: { $ne: category._id } // Exclude current category
+            };
+            if (category.subType) checkQuery.subType = category.subType;
+            if (category.vehicleType) checkQuery.vehicleType = category.vehicleType;
+            if (category.parentCategory) checkQuery.parentCategory = category.parentCategory;
+            
+            const duplicate = await Category.findOne(checkQuery);
+            if (duplicate) {
+                return res.status(409).json({
+                    success: false,
+                    message: `Category "${category.name}" already exists${category.vehicleType ? ` for ${category.vehicleType}` : ''}.`
+                });
+            }
+        }
 
         await category.save();
 

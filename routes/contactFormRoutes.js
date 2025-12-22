@@ -8,11 +8,12 @@ import {
     deleteContactForm
 } from '../controllers/contactFormController.js';
 import { auth, authorize } from '../middlewares/authMiddleware.js';
+import { contactFormLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
-// Public route - submit contact form
-router.post("/", submitContactForm);
+// Public route - submit contact form with rate limiting
+router.post("/", contactFormLimiter, submitContactForm);
 
 // Admin routes
 router.use(auth);

@@ -20,8 +20,7 @@ export const generateVerificationCode = () => {
 /**
  * Send verification code via SMS
  * 
- * TODO: Integrate with actual SMS service (Twilio, AWS SNS, etc.)
- * For now, this is a placeholder that logs the code
+ * Supports Twilio integration. Falls back to development logging if Twilio is not configured.
  * 
  * @param {string} phoneNumber - Phone number to send code to
  * @param {string} code - Verification code
@@ -29,31 +28,85 @@ export const generateVerificationCode = () => {
  */
 export const sendVerificationCode = async (phoneNumber, code) => {
     try {
+        // Validate phone number format
+        if (!phoneNumber || typeof phoneNumber !== 'string') {
+            throw new Error('Invalid phone number format');
+        }
+
+        // Normalize phone number (remove spaces, dashes, etc.)
+        const normalizedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
+        
+        // Basic phone number validation
+        if (!/^\+?\d{9,15}$/.test(normalizedPhone)) {
+            throw new Error('Invalid phone number format. Must be 9-15 digits with optional country code.');
+        }
+
         // Check if Twilio is configured
-        if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
-            const twilio = await import('twilio');
-            const client = twilio.default(
-                process.env.TWILIO_ACCOUNT_SID,
-                process.env.TWILIO_AUTH_TOKEN
-            );
+        const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+        const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+        const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
-            const message = await client.messages.create({
-                body: `Your Sello verification code is: ${code}. This code expires in 10 minutes.`,
-                from: process.env.TWILIO_PHONE_NUMBER,
-                to: phoneNumber
-            });
+        if (twilioAccountSid && twilioAuthToken && twilioPhoneNumber) {
+            // Validate Twilio credentials format
+            if (!twilioAccountSid.startsWith('AC') || twilioAccountSid.length !== 34) {
+                Logger.warn('Invalid Twilio Account SID format');
+                throw new Error('Twilio Account SID is invalid');
+            }
 
-            Logger.info(`SMS verification code sent via Twilio`, { 
-                phoneNumber: phoneNumber.substring(0, 4) + '****', 
-                sid: message.sid 
-            });
+            if (twilioAuthToken.length !== 32) {
+                Logger.warn('Invalid Twilio Auth Token format');
+                throw new Error('Twilio Auth Token is invalid');
+            }
 
-            return { success: true, sid: message.sid };
+            try {
+                const twilio = await import('twilio');
+                const client = twilio.default(twilioAccountSid, twilioAuthToken);
+
+                // Validate Twilio phone number format
+                if (!twilioPhoneNumber.startsWith('+')) {
+                    Logger.warn('Twilio phone number should start with +');
+                }
+
+                const message = await client.messages.create({
+                    body: `Your Sello verification code is: ${code}. This code expires in 10 minutes.`,
+                    from: twilioPhoneNumber,
+                    to: normalizedPhone
+                });
+
+                Logger.info(`SMS verification code sent via Twilio`, { 
+                    phoneNumber: normalizedPhone.substring(0, 4) + '****', 
+                    sid: message.sid,
+                    status: message.status
+                });
+
+                return { success: true, sid: message.sid };
+            } catch (twilioError) {
+                // Handle specific Twilio errors
+                if (twilioError.code === 21211) {
+                    Logger.error('Invalid phone number format for Twilio', { phoneNumber: normalizedPhone.substring(0, 4) + '****' });
+                    throw new Error('Invalid phone number format');
+                } else if (twilioError.code === 21608) {
+                    Logger.error('Twilio phone number not verified (trial account)', { phoneNumber: normalizedPhone.substring(0, 4) + '****' });
+                    throw new Error('Phone number not verified. Please verify your phone number in Twilio console.');
+                } else if (twilioError.code === 20003) {
+                    Logger.error('Twilio authentication failed', { phoneNumber: normalizedPhone.substring(0, 4) + '****' });
+                    throw new Error('SMS service authentication failed. Please check Twilio credentials.');
+                } else {
+                    Logger.error('Twilio API error', twilioError, { phoneNumber: normalizedPhone.substring(0, 4) + '****' });
+                    throw new Error(`Failed to send SMS: ${twilioError.message}`);
+                }
+            }
         } else {
             // Fallback: Log code for development (REMOVE IN PRODUCTION)
-            Logger.warn(`SMS verification code for ${phoneNumber.substring(0, 4) + '****'}: ${code}`, {
+            const missingVars = [];
+            if (!twilioAccountSid) missingVars.push('TWILIO_ACCOUNT_SID');
+            if (!twilioAuthToken) missingVars.push('TWILIO_AUTH_TOKEN');
+            if (!twilioPhoneNumber) missingVars.push('TWILIO_PHONE_NUMBER');
+
+            Logger.warn(`SMS verification code for ${normalizedPhone.substring(0, 4) + '****'}: ${code}`, {
                 message: 'Twilio not configured. Code logged for development only.',
-                phoneNumber: phoneNumber.substring(0, 4) + '****',
+                missingVars,
+                phoneNumber: normalizedPhone.substring(0, 4) + '****',
                 code
             });
 
@@ -65,7 +118,9 @@ export const sendVerificationCode = async (phoneNumber, code) => {
             return { success: true, sid: 'dev-mode' };
         }
     } catch (error) {
-        Logger.error('Error sending verification code', error, { phoneNumber: phoneNumber.substring(0, 4) + '****' });
+        Logger.error('Error sending verification code', error, { 
+            phoneNumber: phoneNumber ? phoneNumber.substring(0, 4) + '****' : 'unknown' 
+        });
         throw new Error(`Failed to send verification code: ${error.message}`);
     }
 };

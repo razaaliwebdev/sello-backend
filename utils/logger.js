@@ -1,11 +1,31 @@
 /**
  * Centralized Logging Utility
  * Provides structured logging for errors, warnings, and info
+ * Integrates with Sentry for error tracking
  */
 
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// Initialize Sentry if DSN is provided
+let Sentry = null;
+if (process.env.SENTRY_DSN) {
+    try {
+        import('@sentry/node').then((sentryModule) => {
+            Sentry = sentryModule;
+            Sentry.init({
+                dsn: process.env.SENTRY_DSN,
+                environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
+                tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+            });
+        }).catch(() => {
+            // Sentry not installed, continue without it
+        });
+    } catch (error) {
+        // Sentry initialization failed, continue without it
+    }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,6 +90,29 @@ class Logger {
         
         writeLog('error', 'ERROR', message, errorData);
         console.error(`[ERROR] ${message}`, error || '');
+        
+        // Send to Sentry if available
+        if (Sentry && process.env.SENTRY_DSN) {
+            try {
+                if (error instanceof Error) {
+                    Sentry.captureException(error, {
+                        extra: { message, ...metadata },
+                        tags: { logger: 'server' }
+                    });
+                } else {
+                    Sentry.captureMessage(message, {
+                        level: 'error',
+                        extra: { error, ...metadata },
+                        tags: { logger: 'server' }
+                    });
+                }
+            } catch (sentryError) {
+                // Sentry failed, continue without it
+                if (process.env.NODE_ENV === 'development') {
+                    console.warn('Sentry error tracking failed:', sentryError);
+                }
+            }
+        }
     }
 
     /**

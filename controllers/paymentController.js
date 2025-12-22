@@ -1,7 +1,9 @@
 import Stripe from 'stripe';
 import User from '../models/userModel.js';
+import ProcessedWebhook from '../models/processedWebhookModel.js';
 import Logger from '../utils/logger.js';
 import { SUBSCRIPTION_PLANS } from './subscriptionController.js';
+import { createPaymentIntent, verifyPayment } from '../services/paymentService.js';
 
 // Initialize Stripe only if key is provided
 let stripe = null;
@@ -15,21 +17,18 @@ if (process.env.STRIPE_SECRET_KEY) {
         Logger.warn('Failed to initialize Stripe:', error.message);
     }
 } else {
-    Logger.warn('STRIPE_SECRET_KEY not set. Payment features will be disabled.');
+    Logger.warn('STRIPE_SECRET_KEY not set. Stripe payment features will be disabled.');
 }
 
+// Get payment gateway from environment
+const PAYMENT_GATEWAY = (process.env.PAYMENT_GATEWAY || 'stripe').toLowerCase();
+
 /**
- * Create Stripe Checkout Session for Subscription
+ * Create Checkout Session for Subscription
+ * Supports multiple payment gateways: Stripe, JazzCash
  */
 export const createSubscriptionCheckout = async (req, res) => {
     try {
-        if (!stripe) {
-            return res.status(503).json({
-                success: false,
-                message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
-            });
-        }
-
         const { plan, autoRenew = true } = req.body;
 
         if (!plan || !SUBSCRIPTION_PLANS[plan]) {
@@ -60,43 +59,80 @@ export const createSubscriptionCheckout = async (req, res) => {
             });
         }
 
-        // Create Stripe Checkout Session
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
+        // Handle different payment gateways
+        if (PAYMENT_GATEWAY === 'jazzcash') {
+            // JazzCash integration
+            const returnUrl = `${process.env.FRONTEND_URL || clientUrl}/subscription/success`;
+            const paymentIntent = await createPaymentIntent(
+                selectedPlan.price,
+                'PKR',
                 {
-                    price_data: {
-                        currency: 'usd',
-                        product_data: {
-                            name: `${selectedPlan.name} Subscription`,
-                            description: selectedPlan.features.join(', ')
-                        },
-                        unit_amount: Math.round(selectedPlan.price * 100), // Convert to cents
-                        recurring: autoRenew ? {
-                            interval: 'month'
-                        } : undefined
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: autoRenew ? 'subscription' : 'payment',
-            success_url: `${clientUrl}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${clientUrl}/profile`,
-            customer_email: user.email,
-            metadata: {
-                userId: user._id.toString(),
-                plan: plan,
-                autoRenew: autoRenew.toString()
-            }
-        });
+                    userId: user._id.toString(),
+                    plan: plan,
+                    autoRenew: autoRenew.toString(),
+                    purpose: 'subscription',
+                    description: `${selectedPlan.name} Subscription`,
+                    returnUrl: returnUrl,
+                    billReference: `SUB-${user._id}-${Date.now()}`
+                }
+            );
 
-        return res.status(200).json({
-            success: true,
-            data: {
-                sessionId: session.id,
-                url: session.url
+            return res.status(200).json({
+                success: true,
+                data: {
+                    sessionId: paymentIntent.id,
+                    paymentUrl: paymentIntent.payment_url,
+                    paymentData: paymentIntent.payment_data,
+                    gateway: 'jazzcash'
+                }
+            });
+        } else {
+            // Stripe integration (default)
+            if (!stripe) {
+                return res.status(503).json({
+                    success: false,
+                    message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
+                });
             }
-        });
+
+            const session = await stripe.checkout.sessions.create({
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'usd',
+                            product_data: {
+                                name: `${selectedPlan.name} Subscription`,
+                                description: selectedPlan.features.join(', ')
+                            },
+                            unit_amount: Math.round(selectedPlan.price * 100), // Convert to cents
+                            recurring: autoRenew ? {
+                                interval: 'month'
+                            } : undefined
+                        },
+                        quantity: 1,
+                    },
+                ],
+                mode: autoRenew ? 'subscription' : 'payment',
+                success_url: `${clientUrl}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${clientUrl}/profile`,
+                customer_email: user.email,
+                metadata: {
+                    userId: user._id.toString(),
+                    plan: plan,
+                    autoRenew: autoRenew.toString()
+                }
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    sessionId: session.id,
+                    url: session.url,
+                    gateway: 'stripe'
+                }
+            });
+        }
     } catch (error) {
         Logger.error('Create Subscription Checkout Error:', error);
         return res.status(500).json({
@@ -108,17 +144,11 @@ export const createSubscriptionCheckout = async (req, res) => {
 };
 
 /**
- * Create Stripe Checkout Session for Boost
+ * Create Checkout Session for Boost
+ * Supports multiple payment gateways: Stripe, JazzCash
  */
 export const createBoostCheckout = async (req, res) => {
     try {
-        if (!stripe) {
-            return res.status(503).json({
-                success: false,
-                message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
-            });
-        }
-
         const { carId, duration = 7 } = req.body;
 
         if (!carId) {
@@ -175,41 +205,78 @@ export const createBoostCheckout = async (req, res) => {
 
         const boostCost = 5 * duration; // $5 per day
 
-        // Create Stripe Checkout Session
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
+        // Handle different payment gateways
+        if (PAYMENT_GATEWAY === 'jazzcash') {
+            // JazzCash integration
+            const returnUrl = `${process.env.FRONTEND_URL || clientUrl}/boost/success`;
+            const paymentIntent = await createPaymentIntent(
+                boostCost,
+                'PKR',
                 {
-                    price_data: {
-                        currency: 'usd',
-                        product_data: {
-                            name: `Boost Post for ${duration} days`,
-                            description: `Promote your car listing to the top for ${duration} days`
-                        },
-                        unit_amount: Math.round(boostCost * 100), // Convert to cents
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: 'payment',
-            success_url: `${clientUrl}/boost/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${clientUrl}/my-listings`,
-            customer_email: req.user.email,
-            metadata: {
-                userId: req.user._id.toString(),
-                carId: carId,
-                duration: duration.toString(),
-                purpose: 'boost'
-            }
-        });
+                    userId: req.user._id.toString(),
+                    carId: carId,
+                    duration: duration.toString(),
+                    purpose: 'boost',
+                    description: `Boost Post for ${duration} days`,
+                    returnUrl: returnUrl,
+                    billReference: `BOOST-${carId}-${Date.now()}`
+                }
+            );
 
-        return res.status(200).json({
-            success: true,
-            data: {
-                sessionId: session.id,
-                url: session.url
+            return res.status(200).json({
+                success: true,
+                data: {
+                    sessionId: paymentIntent.id,
+                    paymentUrl: paymentIntent.payment_url,
+                    paymentData: paymentIntent.payment_data,
+                    gateway: 'jazzcash'
+                }
+            });
+        } else {
+            // Stripe integration (default)
+            if (!stripe) {
+                return res.status(503).json({
+                    success: false,
+                    message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
+                });
             }
-        });
+
+            const session = await stripe.checkout.sessions.create({
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'usd',
+                            product_data: {
+                                name: `Boost Post for ${duration} days`,
+                                description: `Promote your car listing to the top for ${duration} days`
+                            },
+                            unit_amount: Math.round(boostCost * 100), // Convert to cents
+                        },
+                        quantity: 1,
+                    },
+                ],
+                mode: 'payment',
+                success_url: `${clientUrl}/boost/success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${clientUrl}/my-listings`,
+                customer_email: req.user.email,
+                metadata: {
+                    userId: req.user._id.toString(),
+                    carId: carId,
+                    duration: duration.toString(),
+                    purpose: 'boost'
+                }
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    sessionId: session.id,
+                    url: session.url,
+                    gateway: 'stripe'
+                }
+            });
+        }
     } catch (error) {
         Logger.error('Create Boost Checkout Error:', error);
         return res.status(500).json({
@@ -217,6 +284,139 @@ export const createBoostCheckout = async (req, res) => {
             message: 'Error creating checkout session',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
+    }
+};
+
+/**
+ * JazzCash Webhook/Callback Handler
+ */
+export const jazzcashWebhook = async (req, res) => {
+    try {
+        const callbackData = req.body;
+        
+        // Verify payment using JazzCash verification
+        const verification = await verifyPayment(callbackData.pp_TxnRefNo || callbackData.pp_TxnRefNo, callbackData);
+        
+        if (!verification.verified) {
+            Logger.warn('JazzCash payment verification failed', { 
+                transactionId: callbackData.pp_TxnRefNo,
+                responseCode: callbackData.pp_ResponseCode 
+            });
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Payment verification failed' 
+            });
+        }
+
+        // Extract metadata from callback
+        const userId = callbackData.ppmpf_1;
+        const purpose = callbackData.ppmpf_2;
+        const carId = callbackData.ppmpf_3;
+        const duration = callbackData.ppmpf_4;
+        const plan = callbackData.ppmpf_5;
+
+        if (!userId) {
+            Logger.error('Missing userId in JazzCash callback', { callbackData });
+            return res.status(400).json({ success: false, message: 'Invalid callback data' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            Logger.error(`User ${userId} not found for JazzCash payment`);
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        // Check if payment was already processed (idempotency)
+        const existingPayment = user.paymentHistory.find(
+            p => p.transactionId === callbackData.pp_TxnRefNo && p.status === 'completed'
+        );
+        
+        if (existingPayment) {
+            Logger.info(`JazzCash payment ${callbackData.pp_TxnRefNo} already processed`);
+            return res.json({ received: true, duplicate: true });
+        }
+
+        // Handle boost payment
+        if (purpose === 'boost' && carId && duration) {
+            const Car = (await import('../models/carModel.js')).default;
+            const car = await Car.findById(carId);
+            
+            if (car && car.postedBy.toString() === userId.toString()) {
+                const boostCost = parseInt(duration) * 5;
+                const expiryDate = new Date();
+                expiryDate.setDate(expiryDate.getDate() + parseInt(duration));
+
+                car.isBoosted = true;
+                car.boostExpiry = expiryDate;
+                car.boostPriority = 50;
+                car.boostHistory.push({
+                    boostedAt: new Date(),
+                    boostedBy: userId,
+                    boostType: 'user',
+                    duration: parseInt(duration),
+                    expiredAt: expiryDate,
+                    paymentMethod: 'jazzcash',
+                    transactionId: callbackData.pp_TxnRefNo
+                });
+
+                user.paymentHistory.push({
+                    amount: boostCost,
+                    currency: 'PKR',
+                    paymentMethod: 'jazzcash',
+                    transactionId: callbackData.pp_TxnRefNo,
+                    purpose: 'boost',
+                    status: 'completed',
+                    createdAt: new Date(),
+                    metadata: { carId, duration }
+                });
+
+                user.totalSpent = (user.totalSpent || 0) + boostCost;
+                await Promise.all([car.save(), user.save()]);
+                
+                Logger.info(`Car ${carId} boosted via JazzCash - Transaction: ${callbackData.pp_TxnRefNo}`);
+            }
+        } 
+        // Handle subscription payment
+        else if (plan) {
+            const selectedPlan = SUBSCRIPTION_PLANS[plan];
+            if (selectedPlan) {
+                const startDate = new Date();
+                const endDate = new Date();
+                endDate.setDate(endDate.getDate() + selectedPlan.duration);
+
+                user.subscription = {
+                    plan: plan,
+                    startDate: startDate,
+                    endDate: endDate,
+                    isActive: true,
+                    autoRenew: false // JazzCash doesn't support auto-renewal
+                };
+
+                if (selectedPlan.boostCredits > 0) {
+                    user.boostCredits += selectedPlan.boostCredits;
+                }
+
+                user.paymentHistory.push({
+                    amount: selectedPlan.price,
+                    currency: 'PKR',
+                    paymentMethod: 'jazzcash',
+                    transactionId: callbackData.pp_TxnRefNo,
+                    purpose: 'subscription',
+                    status: 'completed',
+                    createdAt: new Date()
+                });
+
+                user.totalSpent += selectedPlan.price;
+                await user.save();
+                
+                Logger.info(`User ${userId} subscribed to ${plan} plan via JazzCash`);
+            }
+        }
+
+        return res.json({ received: true, success: true });
+    } catch (error) {
+        Logger.error('JazzCash webhook handler error:', error);
+        return res.status(500).json({ error: 'Webhook handler failed' });
     }
 };
 
@@ -246,6 +446,29 @@ export const stripeWebhook = async (req, res) => {
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
+    // Check if this webhook event has already been processed (idempotency)
+    try {
+        const existingEvent = await ProcessedWebhook.findOne({ eventId: event.id });
+        if (existingEvent) {
+            Logger.info('Duplicate webhook event ignored', {
+                eventId: event.id,
+                eventType: event.type,
+                previouslyProcessedAt: existingEvent.processedAt
+            });
+            return res.json({
+                received: true,
+                duplicate: true,
+                message: 'Event already processed'
+            });
+        }
+    } catch (idempotencyCheckError) {
+        // If idempotency check fails, log but continue (don't block webhook processing)
+        Logger.warn('Failed to check webhook idempotency', {
+            error: idempotencyCheckError.message,
+            eventId: event.id
+        });
+    }
+
     try {
         // Handle the event
         switch (event.type) {
@@ -267,6 +490,33 @@ export const stripeWebhook = async (req, res) => {
 
             default:
                 Logger.info(`Unhandled event type: ${event.type}`);
+        }
+
+        // Mark event as processed (idempotency)
+        try {
+            await ProcessedWebhook.create({
+                eventId: event.id,
+                eventType: event.type,
+                processedAt: new Date(),
+                metadata: {
+                    livemode: event.livemode,
+                    apiVersion: event.api_version
+                }
+            });
+        } catch (saveError) {
+            // If save fails (e.g., duplicate key), log but don't fail the webhook
+            // This handles race conditions where same event arrives simultaneously
+            if (saveError.code === 11000) {
+                Logger.warn('Webhook event already processed (race condition)', {
+                    eventId: event.id,
+                    eventType: event.type
+                });
+            } else {
+                Logger.error('Failed to save processed webhook event', {
+                    error: saveError.message,
+                    eventId: event.id
+                });
+            }
         }
 
         res.json({ received: true });

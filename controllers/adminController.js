@@ -941,11 +941,6 @@ export const featureCar = async (req, res) => {
 
         const { carId } = req.params;
         const { featured } = req.body;
-        
-        // Log for debugging (only in development)
-        if (process.env.NODE_ENV === 'development') {
-            Logger.debug("Feature Car Request", { carId, featured, body: req.body, params: req.params, userId: req.user?._id });
-        }
 
         if (!mongoose.Types.ObjectId.isValid(carId)) {
             return res.status(400).json({

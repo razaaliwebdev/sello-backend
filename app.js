@@ -33,6 +33,7 @@ import subscriptionPlanRouter from './routes/subscriptionPlanRoutes.js';
 import verificationRouter from './routes/verificationRoutes.js';
 import savedSearchRouter from './routes/savedSearchRoutes.js';
 import priceRouter from './routes/priceRoutes.js';
+import seoRouter from './routes/seoRoutes.js';
 import { performanceMonitor } from './middlewares/performanceMiddleware.js';
 import { checkMaintenanceMode } from './middlewares/maintenanceModeMiddleware.js';
 import Logger from './utils/logger.js';
@@ -72,11 +73,18 @@ app.use(compression());
 // CORS configuration - supports multiple origins from environment variable
 const allowedOrigins = process.env.CLIENT_URL
   ? process.env.CLIENT_URL.split(',').map(url => url.trim())
-  : ["https://sello.pk","http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4000", "http://localhost:5174"];
+  : process.env.NODE_ENV === 'production' 
+    ? [] // Production: require CLIENT_URL to be set
+    : ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4000", "http://localhost:5174"];
 
 // Add production URL if provided
 if (process.env.PRODUCTION_URL) {
   allowedOrigins.push(process.env.PRODUCTION_URL);
+}
+
+// Add FRONTEND_URL if different from CLIENT_URL
+if (process.env.FRONTEND_URL && !allowedOrigins.includes(process.env.FRONTEND_URL)) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
 app.use(cors({
@@ -120,8 +128,16 @@ app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Request ID tracking - add early for logging
+import requestIdMiddleware from './middlewares/requestIdMiddleware.js';
+app.use(requestIdMiddleware);
+
 // Performance monitoring
 app.use(performanceMonitor);
+
+// Request timeout middleware (30 seconds default)
+import { requestTimeout } from './middlewares/requestTimeout.js';
+app.use(requestTimeout(30000)); // 30 seconds timeout
 
 // Security: Input sanitization middleware
 import { sanitizeInput } from './middlewares/sanitizeMiddleware.js';
@@ -129,9 +145,10 @@ import { rateLimit, validateFileUpload } from './middlewares/securityMiddleware.
 // Exclude fields that should not be sanitized (passwords, tokens, HTML content from editors)
 app.use(sanitizeInput(['password', 'token', 'otp', 'content', 'description', 'message', 'geoLocation']));
 
-// Rate limiting (use Redis in production for distributed systems)
+// Rate limiting (uses Redis when available for distributed systems)
 // Apply rate limiting in all environments
 // Development: More lenient (500 req/15min), Production: Stricter (100 req/15min)
+// Now uses express-rate-limit with Redis store support
 app.use(rateLimit);
 
 // Maintenance mode check - apply to all routes except admin routes
@@ -176,14 +193,109 @@ app.use("/api/verification", verificationRouter);
 app.use("/api/saved-searches", savedSearchRouter);
 app.use("/api/price", priceRouter);
 
-// Health check route
-app.get("/", (req, res) => {
-  res.json({
+// SEO routes (must be after API routes to avoid conflicts)
+app.use("/", seoRouter); // SEO routes at root level (sitemap.xml, robots.txt)
+
+// Swagger API Documentation
+if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true') {
+  try {
+    const swaggerConfig = await import('./config/swagger.js');
+    const { initializeSwagger, getSwaggerSpec, swaggerUi } = swaggerConfig;
+    
+    // Initialize swagger packages
+    await initializeSwagger();
+    
+    const swaggerSpec = getSwaggerSpec();
+    if (swaggerSpec && swaggerUi) {
+      app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+        customCss: '.swagger-ui .topbar { display: none }',
+        customSiteTitle: 'Sello API Documentation'
+      }));
+      Logger.info('Swagger documentation available at /api-docs');
+    } else {
+      Logger.warn('Swagger packages not installed. Install with: npm install swagger-jsdoc swagger-ui-express');
+    }
+  } catch (error) {
+    Logger.warn('Swagger not configured', { error: error.message });
+  }
+}
+
+// Health check route - enhanced with detailed status
+app.get("/", async (req, res) => {
+  const health = {
     success: true,
     message: "SELLO API is running",
     version: "1.0.0",
-    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected"
-  });
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    services: {
+      database: {
+        status: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+        readyState: mongoose.connection.readyState,
+        name: mongoose.connection.name || 'unknown'
+      },
+      redis: {
+        status: "unknown"
+      }
+    }
+  };
+
+  // Check Redis if available
+  try {
+    const redis = await import('./utils/redis.js');
+    health.services.redis.status = redis.default.isAvailable() ? "connected" : "disconnected";
+  } catch (error) {
+    health.services.redis.status = "not configured";
+  }
+
+  // Set cache headers
+  res.set('Cache-Control', 'no-cache');
+  
+  const statusCode = health.services.database.status === "connected" ? 200 : 503;
+  res.status(statusCode).json(health);
+});
+
+// Detailed health check endpoint
+app.get("/health", async (req, res) => {
+  const health = {
+    success: true,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    version: "1.0.0",
+    services: {
+      database: {
+        status: mongoose.connection.readyState === 1 ? "healthy" : "unhealthy",
+        readyState: mongoose.connection.readyState,
+        name: mongoose.connection.name || 'unknown',
+        host: mongoose.connection.host || 'unknown'
+      },
+      redis: {
+        status: "unknown"
+      }
+    },
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + " MB",
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + " MB",
+      rss: Math.round(process.memoryUsage().rss / 1024 / 1024) + " MB"
+    }
+  };
+
+  // Check Redis if available
+  try {
+    const redis = await import('./utils/redis.js');
+    health.services.redis.status = redis.default.isAvailable() ? "healthy" : "unhealthy";
+  } catch (error) {
+    health.services.redis.status = "not configured";
+  }
+
+  // Determine overall health
+  const isHealthy = health.services.database.status === "healthy";
+  const statusCode = isHealthy ? 200 : 503;
+  
+  res.set('Cache-Control', 'no-cache');
+  res.status(statusCode).json(health);
 });
 
 // 404 handler - must be after all routes

@@ -5,6 +5,7 @@
  */
 
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 dotenv.config();
 
 const PAYMENT_GATEWAY = process.env.PAYMENT_GATEWAY || 'stripe'; // stripe, payfast, jazzcash
@@ -30,7 +31,8 @@ export const createPaymentIntent = async (amount, currency = "USD", metadata = {
                 return await createStripePaymentIntent(amount, currency, metadata);
         }
     } catch (error) {
-        console.error('Payment Intent Creation Error:', error);
+        const Logger = (await import('../utils/logger.js')).default;
+        Logger.error('Payment Intent Creation Error', error);
         throw new Error(`Payment gateway error: ${error.message}`);
     }
 };
@@ -54,7 +56,8 @@ export const confirmPayment = async (paymentIntentId, paymentMethodId) => {
                 return await confirmStripePayment(paymentIntentId, paymentMethodId);
         }
     } catch (error) {
-        console.error('Payment Confirmation Error:', error);
+        const Logger = (await import('../utils/logger.js')).default;
+        Logger.error('Payment Confirmation Error', error);
         throw new Error(`Payment confirmation failed: ${error.message}`);
     }
 };
@@ -161,26 +164,74 @@ const confirmPayFastPayment = async (paymentIntentId, paymentMethodId) => {
  * JazzCash Payment Implementation
  */
 const createJazzCashPaymentIntent = async (amount, currency, metadata) => {
-    // JazzCash integration would go here
     if (!process.env.JAZZCASH_MERCHANT_ID || !process.env.JAZZCASH_PASSWORD) {
         throw new Error('JazzCash credentials not configured');
     }
 
+    const merchantId = process.env.JAZZCASH_MERCHANT_ID;
+    const password = process.env.JAZZCASH_PASSWORD;
+    // Use production URL by default, sandbox only if explicitly set
+    const jazzcashUrl = process.env.JAZZCASH_URL || 
+        (process.env.NODE_ENV === 'production' 
+            ? 'https://payments.jazzcash.com.pk' 
+            : 'https://sandbox.jazzcash.com.pk');
+    
+    // Generate unique transaction ID
+    const pp_TxnRefNo = `T${Date.now()}${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    
+    // JazzCash requires amount in paisa (smallest currency unit for PKR)
+    // For PKR: 1 PKR = 100 paisa
+    // For other currencies, convert appropriately
+    const amountInPaisa = currency === 'PKR' ? Math.round(amount * 100) : Math.round(amount * 100);
+    
+    // Prepare payment data
+    const paymentData = {
+        pp_Version: '1.1',
+        pp_TxnType: 'MPAY',
+        pp_Language: 'EN',
+        pp_MerchantID: merchantId,
+        pp_SubMerchantID: '',
+        pp_Password: password,
+        pp_TxnRefNo: pp_TxnRefNo,
+        pp_Amount: amountInPaisa.toString(),
+        pp_TxnCurrency: currency || 'PKR',
+        pp_TxnDateTime: new Date().toISOString().replace(/[-:]/g, '').split('.')[0],
+        pp_BillReference: metadata.billReference || pp_TxnRefNo,
+        pp_Description: metadata.description || 'Payment for Sello',
+        pp_TxnExpiryDateTime: new Date(Date.now() + 30 * 60 * 1000).toISOString().replace(/[-:]/g, '').split('.')[0],
+        pp_ReturnURL: metadata.returnUrl || `${process.env.FRONTEND_URL || process.env.CLIENT_URL?.split(',')[0] || 'http://localhost:5173'}/payment/callback`,
+        pp_SecureHash: '',
+        ppmpf_1: metadata.userId || '',
+        ppmpf_2: metadata.purpose || '',
+        ppmpf_3: metadata.carId || '',
+        ppmpf_4: metadata.duration || '',
+        ppmpf_5: metadata.plan || ''
+    };
+
+    // Generate secure hash
+    // JazzCash uses SHA256 hash of sorted string values
+    const sortedKeys = Object.keys(paymentData).filter(key => key !== 'pp_SecureHash').sort();
+    const hashString = sortedKeys.map(key => paymentData[key]).join('&') + '&' + password;
+    const secureHash = crypto.createHash('sha256').update(hashString).digest('hex');
+    paymentData.pp_SecureHash = secureHash;
+
     return {
-        id: `jz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: pp_TxnRefNo,
         amount: amount,
-        currency: currency,
+        currency: currency || 'PKR',
         status: "pending",
-        payment_url: `${process.env.JAZZCASH_URL || 'https://sandbox.jazzcash.com.pk'}/payment`,
+        payment_url: `${jazzcashUrl}/CustomerPortal/transactionmanagement/merchantform/`,
+        payment_data: paymentData,
         metadata: metadata
     };
 };
 
 const confirmJazzCashPayment = async (paymentIntentId, paymentMethodId) => {
-    // JazzCash confirmation logic
+    // JazzCash confirmation is handled via webhook/callback
+    // This function is kept for compatibility
     return {
         id: paymentIntentId,
-        status: "succeeded",
+        status: "pending",
         amount_received: 0,
         payment_method: paymentMethodId,
         created: Date.now()
@@ -279,7 +330,8 @@ export const verifyPayment = async (transactionId) => {
                 return await verifyStripePayment(transactionId);
         }
     } catch (error) {
-        console.error('Payment Verification Error:', error);
+        const Logger = (await import('../utils/logger.js')).default;
+        Logger.error('Payment Verification Error', error);
         throw new Error(`Payment verification failed: ${error.message}`);
     }
 };
@@ -317,11 +369,60 @@ const verifyPayFastPayment = async (transactionId) => {
     };
 };
 
-const verifyJazzCashPayment = async (transactionId) => {
-    // JazzCash verification logic
+const verifyJazzCashPayment = async (transactionId, callbackData = null) => {
+    if (!process.env.JAZZCASH_MERCHANT_ID || !process.env.JAZZCASH_PASSWORD) {
+        throw new Error('JazzCash credentials not configured');
+    }
+
+    // If callback data is provided, verify the hash
+    if (callbackData && typeof callbackData === 'object') {
+        const password = process.env.JAZZCASH_PASSWORD;
+        
+        // Filter out empty values and secure hash for hash calculation
+        const sortedKeys = Object.keys(callbackData)
+            .filter(key => key !== 'pp_SecureHash' && callbackData[key] !== '' && callbackData[key] != null)
+            .sort();
+        
+        // Build hash string: sorted values joined by &, then append password
+        const hashString = sortedKeys.map(key => String(callbackData[key])).join('&') + '&' + password;
+        const calculatedHash = crypto.createHash('sha256').update(hashString).digest('hex');
+        
+        // Verify hash (case-insensitive comparison)
+        if (calculatedHash.toLowerCase() !== (callbackData.pp_SecureHash || '').toLowerCase()) {
+            return {
+                id: transactionId,
+                status: "failed",
+                verified: false,
+                error: "Hash verification failed"
+            };
+        }
+
+        // Check response code (000 = success in JazzCash)
+        const responseCode = String(callbackData.pp_ResponseCode || '').trim();
+        const responseMessage = String(callbackData.pp_ResponseMessage || '').trim();
+        const isSuccess = responseCode === '000' || 
+                         responseCode === '00' || 
+                         responseMessage.toLowerCase().includes('success');
+
+        // Convert amount from paisa to PKR
+        const amountInPaisa = callbackData.pp_Amount ? parseFloat(callbackData.pp_Amount) : 0;
+        const amount = amountInPaisa / 100;
+
+        return {
+            id: callbackData.pp_TxnRefNo || transactionId,
+            status: isSuccess ? "succeeded" : "failed",
+            amount: amount,
+            currency: callbackData.pp_TxnCurrency || 'PKR',
+            verified: isSuccess,
+            responseCode: responseCode,
+            responseMessage: responseMessage
+        };
+    }
+
+    // If no callback data, return pending status
     return {
         id: transactionId,
-        status: "succeeded",
-        verified: true
+        status: "pending",
+        verified: false
     };
 };

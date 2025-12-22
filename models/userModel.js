@@ -242,7 +242,9 @@ const userSchema = new mongoose.Schema(
 // Note: email already has an index from unique: true
 userSchema.index({ status: 1 });
 userSchema.index({ role: 1 });
+userSchema.index({ role: 1, status: 1 }); // Compound index for common admin queries
 userSchema.index({ "subscription.isActive": 1, "subscription.plan": 1 });
+userSchema.index({ "subscription.isActive": 1, "subscription.endDate": 1 }); // For subscription expiration queries
 
 const User = mongoose.model("User", userSchema);
 

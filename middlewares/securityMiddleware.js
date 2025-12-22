@@ -7,41 +7,13 @@ import Logger from '../utils/logger.js';
 import { isValidObjectId } from './sanitizeMiddleware.js';
 
 /**
- * Rate limiting helper (simple in-memory, use Redis in production)
+ * Rate limiting - Now using express-rate-limit with Redis support
+ * This function is deprecated - use rateLimiter.js instead
+ * Kept for backward compatibility but redirects to apiLimiter
  */
-const requestCounts = new Map();
-const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
-// Different limits for different environments
-const RATE_LIMIT_MAX = process.env.NODE_ENV === 'production' ? 100 : 500; // Production: 100, Development: 500 requests per window
+import { apiLimiter } from './rateLimiter.js';
 
-export const rateLimit = (req, res, next) => {
-    const key = req.ip || req.connection.remoteAddress;
-    const now = Date.now();
-    
-    if (!requestCounts.has(key)) {
-        requestCounts.set(key, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
-        return next();
-    }
-    
-    const record = requestCounts.get(key);
-    
-    if (now > record.resetTime) {
-        record.count = 1;
-        record.resetTime = now + RATE_LIMIT_WINDOW;
-        return next();
-    }
-    
-    if (record.count >= RATE_LIMIT_MAX) {
-        Logger.security('Rate limit exceeded', { ip: key, count: record.count });
-        return res.status(429).json({
-            success: false,
-            message: "Too many requests. Please try again later."
-        });
-    }
-    
-    record.count++;
-    next();
-};
+export const rateLimit = apiLimiter;
 
 /**
  * Validate file upload security

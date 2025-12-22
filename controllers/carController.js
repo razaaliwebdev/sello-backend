@@ -437,13 +437,14 @@ export const createCar = async (req, res) => {
         }
         // Don't set engineCapacity for E-bike (even if sent, ignore it)
 
-        // Body Type - required for Car and Van only
-        if (selectedVehicleType === "Car" || selectedVehicleType === "Van") {
+        // Body Type - required for Car, Van, Bus, and Truck
+        if (selectedVehicleType === "Car" || selectedVehicleType === "Van" || 
+            selectedVehicleType === "Bus" || selectedVehicleType === "Truck") {
             if (bodyType && bodyType.trim() !== '') {
                 carData.bodyType = String(bodyType).trim();
             }
         }
-        // Don't set bodyType for other vehicle types
+        // Don't set bodyType for Bike and E-bike
 
         // Car Doors - only for Car and Van
         if (selectedVehicleType === "Car" || selectedVehicleType === "Van") {
@@ -461,14 +462,14 @@ export const createCar = async (req, res) => {
         }
         // Don't set horsepower for E-bike
 
-        // Number of Cylinders - not for E-bike or Bike
-        if (selectedVehicleType !== "E-bike" && selectedVehicleType !== "Bike") {
+        // Number of Cylinders - not for E-bike (Bikes DO have cylinders: 1, 2, 3, 4, or 6)
+        if (selectedVehicleType !== "E-bike") {
             const cyl = parseInt(numberOfCylinders, 10);
             if (!isNaN(cyl) && cyl > 0) {
                 carData.numberOfCylinders = cyl;
             }
         }
-        // Don't set numberOfCylinders for E-bike or Bike
+        // Don't set numberOfCylinders for E-bike only
 
         // E-bike specific fields - only set for E-bike
         if (selectedVehicleType === "E-bike") {
@@ -479,6 +480,14 @@ export const createCar = async (req, res) => {
             const motPower = parseInt(motorPower, 10);
             if (!isNaN(motPower) && motPower > 0) {
                 carData.motorPower = motPower;
+            }
+            // E-bikes are electric - set fuelType to Electric if not provided
+            if (!fuelType || fuelType.trim() === '') {
+                carData.fuelType = "Electric";
+            }
+            // Transmission is optional for E-bikes
+            if (!transmission || transmission.trim() === '') {
+                carData.transmission = "Automatic"; // Most E-bikes are automatic
             }
         }
         // Don't set batteryRange/motorPower for non-E-bike vehicles
@@ -924,12 +933,12 @@ export const getAllCars = async (req, res) => {
         // Add featured filter if provided
         if (req.query.featured === 'true' || req.query.featured === true) {
             query.featured = true;
-            Logger.debug('Featured filter applied', { featured: query.featured });
         }
 
-        // Fetch cars with pagination
+        // Fetch cars with pagination - optimized with .lean() and .select()
         // Sort: Featured first, then boosted (by priority), then by creation date
         const cars = await Car.find(query)
+            .select('title make model year price images city location status isBoosted boostExpiry boostPriority featured condition fuelType transmission mileage sellerType postedBy createdAt views geoLocation vehicleType')
             .skip(skip)
             .limit(limit)
             .populate({
@@ -943,7 +952,8 @@ export const getAllCars = async (req, res) => {
                 // push sold listings lower in the results, similar to OLX / PakWheels
                 status: 1, // "active" < "sold" < "expired" < "deleted"
                 createdAt: -1,
-            });
+            })
+            .lean(); // Use lean() for read-only queries - much faster
 
         // Get total count
         const total = await Car.countDocuments(query);
@@ -994,10 +1004,13 @@ export const getSingleCar = async (req, res) => {
             });
         }
 
-        const car = await Car.findById(id).populate({
-            path: "postedBy",
-            select: "name email role sellerRating reviewCount isVerified avatar dealerInfo"
-        });
+        const car = await Car.findById(id)
+            .populate({
+                path: "postedBy",
+                select: "name email role sellerRating reviewCount isVerified avatar dealerInfo"
+            });
+        
+        // Note: Can't use .lean() here because we need to modify the document (views increment)
 
         if (!car) {
             return res.status(404).json({
@@ -1257,11 +1270,9 @@ export const getFilteredCars = async (req, res) => {
         // Build filter query - show approved cars (or cars without isApproved field)
         let filter, locationFilter;
         try {
-            Logger.debug('getFilteredCars - req.query', { query: req.query });
             const queryResult = buildCarQuery(req.query);
             filter = queryResult.filter;
             locationFilter = queryResult.locationFilter;
-            Logger.debug('getFilteredCars - built filter', { filter });
         } catch (queryError) {
             Logger.warn('Invalid filter query parameters', { error: queryError.message, query: req.query });
             return res.status(400).json({
@@ -1306,7 +1317,6 @@ export const getFilteredCars = async (req, res) => {
             ]
         };
         
-        Logger.debug('getFilteredCars - finalFilter', { finalFilter });
 
         // Add geospatial filter if location radius is specified
         if (locationFilter.radius && locationFilter.userLocation) {
@@ -1369,14 +1379,6 @@ export const getFilteredCars = async (req, res) => {
                     .lean(),
                 Car.countDocuments(finalFilter)
             ]);
-            
-            Logger.debug(`getFilteredCars - Found ${cars.length} cars (total: ${total})`);
-            if (req.query.featured === 'true' || req.query.featured === true) {
-                Logger.debug('Featured cars details', { 
-                    count: cars.filter(c => c.featured).length,
-                    total: total 
-                });
-            }
         } catch (dbError) {
             Logger.error('Database query error in getFilteredCars', dbError);
             return res.status(500).json({

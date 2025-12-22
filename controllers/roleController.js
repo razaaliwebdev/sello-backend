@@ -216,7 +216,7 @@ export const getRoleById = async (req, res) => {
             data: role
         });
     } catch (error) {
-        console.error("Get Role By ID Error:", error.message);
+        Logger.error("Get Role By ID Error", error, { roleId: req.params.roleId, userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -277,7 +277,7 @@ export const createRole = async (req, res) => {
             data: role
         });
     } catch (error) {
-        console.error("Create Role Error:", error.message);
+        Logger.error("Create Role Error", error, { userId: req.user?._id, roleData: req.body });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -337,7 +337,7 @@ export const updateRole = async (req, res) => {
             data: role
         });
     } catch (error) {
-        console.error("Update Role Error:", error.message);
+        Logger.error("Update Role Error", error, { roleId: req.params.roleId, userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -398,7 +398,7 @@ export const deleteRole = async (req, res) => {
             message: "Role deleted successfully."
         });
     } catch (error) {
-        console.error("Delete Role Error:", error.message);
+        Logger.error("Delete Role Error", error, { roleId: req.params.roleId, userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -444,7 +444,7 @@ export const inviteUser = async (req, res) => {
                 role: role
             }, null, req);
         } catch (auditError) {
-            console.error("Audit log error (non-blocking):", auditError.message);
+            Logger.error("Audit log error (non-blocking)", auditError);
             // Continue with invite creation even if audit log fails
         }
 
@@ -484,7 +484,7 @@ export const inviteUser = async (req, res) => {
                     finalRole = roleData.displayName || roleData.name || role;
                 }
             } catch (roleError) {
-                console.error("Error fetching role:", roleError.message);
+                Logger.error("Error fetching role", roleError, { roleId });
                 // Continue with provided role
             }
         }
@@ -513,7 +513,7 @@ export const inviteUser = async (req, res) => {
                     }
                 }
             } catch (roleError) {
-                console.error("Error finding role:", roleError.message);
+                Logger.error("Error finding role", roleError, { role });
                 // Use preset permissions as fallback
                 const preset = ROLE_PRESETS[role];
                 if (preset) {
@@ -526,7 +526,7 @@ export const inviteUser = async (req, res) => {
         const validRoles = ["Super Admin", "Marketing Team", "Support Agent", "Blogs/Content Agent", "Custom"];
         if (!validRoles.includes(finalRole)) {
             // If role doesn't match enum, use "Custom" and store the actual role name in permissions
-            console.warn(`Role "${finalRole}" not in invite enum, using "Custom"`);
+            Logger.warn(`Role not in invite enum, using "Custom"`, { role: finalRole });
             rolePermissions.originalRoleName = finalRole;
             finalRole = "Custom";
         }
@@ -617,17 +617,42 @@ export const inviteUser = async (req, res) => {
             const emailResult = await sendEmail(email, `Invitation to join ${siteName} Admin Panel`, emailHtml);
             
             // Check if email was actually sent (not just dev mode simulation)
-            if (emailResult && emailResult.actuallySent !== false && emailResult.messageId && emailResult.messageId !== 'dev-mode') {
+            // Improved check: verify actuallySent is explicitly true and messageId is not 'dev-mode'
+            if (emailResult && 
+                emailResult.actuallySent === true && 
+                emailResult.messageId && 
+                emailResult.messageId !== 'dev-mode') {
                 emailSent = true;
                 actualEmailSent = true;
+                Logger.info('Invite email sent successfully', {
+                    inviteId: invite._id,
+                    email: email,
+                    messageId: emailResult.messageId
+                });
             } else {
-                // Email was not actually sent (dev mode or other issue)
-                emailError = "SMTP not configured. Email was not sent. Please share the invite URL manually.";
+                // Email was not actually sent (dev mode, disabled, or other issue)
+                if (emailResult?.messageId === 'dev-mode') {
+                    emailError = "SMTP not configured. Email was not sent. Please share the invite URL manually.";
+                } else if (emailResult?.messageId === 'disabled') {
+                    emailError = "Email notifications are disabled. Please share the invite URL manually.";
+                } else {
+                    emailError = "Email sending failed or was not configured properly.";
+                }
                 emailSent = false;
+                Logger.warn('Invite email not sent', {
+                    inviteId: invite._id,
+                    email: email,
+                    reason: emailError,
+                    emailResult: emailResult
+                });
             }
         } catch (emailErr) {
-            emailError = emailErr.message;
+            emailError = emailErr.message || "Unknown error occurred while sending email";
             emailSent = false;
+            Logger.error('Invite email sending error', emailErr, {
+                inviteId: invite._id,
+                email: email
+            });
             // Continue - invite is created, email failure shouldn't block the process
         }
 
@@ -666,7 +691,7 @@ export const inviteUser = async (req, res) => {
                 io.to(`user:${req.user._id}`).emit('new-notification', notification);
             }
         } catch (notifError) {
-            console.error("Notification creation error:", notifError);
+            Logger.error("Notification creation error", notifError, { inviteId: invite._id });
         }
 
         // Always include invite URL in response for manual sharing if needed
@@ -686,9 +711,12 @@ export const inviteUser = async (req, res) => {
         }
         
         return res.status(201).json(responseData);
-    } catch (error) {
-        console.error("Invite User Error:", error.message);
-        console.error("Error stack:", error.stack);
+        } catch (error) {
+        Logger.error("Invite User Error", error, { 
+            email: req.body?.email,
+            role: req.body?.role,
+            userId: req.user?._id
+        });
         
         // Provide more specific error messages
         let errorMessage = "Server error. Please try again later.";
@@ -743,7 +771,7 @@ export const getAllInvites = async (req, res) => {
             data: invites
         });
     } catch (error) {
-        console.error("Get All Invites Error:", error.message);
+        Logger.error("Get All Invites Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -810,7 +838,7 @@ export const getPermissionMatrix = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get Permission Matrix Error:", error.message);
+        Logger.error("Get Permission Matrix Error", error, { userId: req.user?._id });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -883,7 +911,7 @@ export const getInviteByToken = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Get Invite By Token Error:", error.message);
+        Logger.error("Get Invite By Token Error", error, { token: req.params.token });
         return res.status(500).json({
             success: false,
             message: "Server error. Please try again later.",
@@ -1014,7 +1042,7 @@ export const acceptInvite = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Accept Invite Error:", error.message);
+        Logger.error("Accept Invite Error", error, { token: req.params.token });
 
         // Handle duplicate email error
         if (error.code === 11000) {

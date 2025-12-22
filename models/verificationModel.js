@@ -5,7 +5,7 @@ const verificationSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true,
-        unique: true
+        unique: true // unique: true automatically creates an index, don't need schema.index()
     },
     documentType: {
         type: String,
@@ -47,7 +47,7 @@ const verificationSchema = new mongoose.Schema({
 });
 
 // Indexes for faster queries
-verificationSchema.index({ user: 1 });
+// Note: user already has an index from unique: true, no need for duplicate index
 verificationSchema.index({ status: 1 });
 verificationSchema.index({ submittedAt: -1 });
 

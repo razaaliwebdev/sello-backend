@@ -10,19 +10,19 @@ const recentlyViewedSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
-      index: true,
+      required: true
+      // Note: Indexes defined below to avoid duplicates
     },
     car: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Car",
-      required: true,
-      index: true,
+      required: true
+      // Note: Indexes defined below to avoid duplicates
     },
     viewedAt: {
       type: Date,
-      default: Date.now,
-      index: true,
+      default: Date.now
+      // Note: TTL index defined below, don't use index: true here
     },
   },
   {
@@ -30,7 +30,8 @@ const recentlyViewedSchema = new mongoose.Schema(
   }
 );
 
-// Compound index for efficient queries
+// Compound indexes for efficient queries
+// Note: Using compound indexes only - Mongoose will use these for single-field queries too
 recentlyViewedSchema.index({ user: 1, viewedAt: -1 });
 recentlyViewedSchema.index({ car: 1, viewedAt: -1 });
 

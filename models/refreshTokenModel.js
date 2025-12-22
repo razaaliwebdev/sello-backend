@@ -16,8 +16,8 @@ const refreshTokenSchema = new mongoose.Schema(
         },
         expiresAt: {
             type: Date,
-            required: true,
-            index: { expireAfterSeconds: 0 } // Auto-delete expired tokens
+            required: true
+            // Note: TTL index defined below, don't use index: true here
         },
         userAgent: {
             type: String,
@@ -45,8 +45,8 @@ const refreshTokenSchema = new mongoose.Schema(
 // Compound indexes for faster lookups
 refreshTokenSchema.index({ userId: 1, isRevoked: 1 });
 refreshTokenSchema.index({ token: 1, isRevoked: 1 });
-// Index for cleanup operations (finding expired tokens)
-refreshTokenSchema.index({ expiresAt: 1 });
+// TTL index for auto-deleting expired tokens (replaces the index: true on expiresAt field)
+refreshTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // Method to check if token is valid
 refreshTokenSchema.methods.isValid = function() {

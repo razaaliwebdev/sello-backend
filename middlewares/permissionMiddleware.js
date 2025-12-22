@@ -1,5 +1,6 @@
 import User from '../models/userModel.js';
 import Role from '../models/roleModel.js';
+import Logger from '../utils/logger.js';
 
 /**
  * Check if user has specific permission
@@ -53,7 +54,7 @@ export const hasPermission = (permission) => {
 
             next();
         } catch (error) {
-            console.error("Permission Check Error:", error.message);
+            Logger.error("Permission Check Error", error, { permission, userId: req.user?._id });
             return res.status(500).json({
                 success: false,
                 message: "Permission check failed. Please try again.",
@@ -117,7 +118,7 @@ export const hasAnyPermission = (...permissions) => {
 
             next();
         } catch (error) {
-            console.error("Permission Check Error:", error.message);
+            Logger.error("Permission Check Error", error, { permission, userId: req.user?._id });
             return res.status(500).json({
                 success: false,
                 message: "Permission check failed. Please try again.",
@@ -181,7 +182,7 @@ export const hasAllPermissions = (...permissions) => {
 
             next();
         } catch (error) {
-            console.error("Permission Check Error:", error.message);
+            Logger.error("Permission Check Error", error, { permission, userId: req.user?._id });
             return res.status(500).json({
                 success: false,
                 message: "Permission check failed. Please try again.",

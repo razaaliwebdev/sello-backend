@@ -4,7 +4,7 @@ const subscriptionPlanSchema = new mongoose.Schema({
     name: {
         type: String,
         required: true,
-        unique: true,
+        unique: true, // unique: true automatically creates an index, don't need schema.index()
         trim: true
     },
     displayName: {
@@ -85,7 +85,7 @@ const subscriptionPlanSchema = new mongoose.Schema({
 
 // Indexes
 subscriptionPlanSchema.index({ isActive: 1, order: 1 });
-subscriptionPlanSchema.index({ name: 1 });
+// Note: name already has an index from unique: true, no need for duplicate index
 
 const SubscriptionPlan = mongoose.model("SubscriptionPlan", subscriptionPlanSchema);
 

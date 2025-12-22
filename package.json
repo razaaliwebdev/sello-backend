@@ -4,10 +4,13 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "cron:auto-delete-sold": "node ./scripts/autoDeleteSoldCars.js"
+    "cron:auto-delete-sold": "node ./scripts/autoDeleteSoldCars.js",
+    "validate-env": "node ./scripts/validateEnv.js"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +24,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
     "express-session": "^1.18.1",
     "google-auth-library": "^10.1.0",
     "helmet": "^8.1.0",
@@ -33,6 +37,15 @@
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "socket.io": "^4.8.1",
-    "stripe": "^20.0.0"
+    "stripe": "^20.0.0",
+    "twilio": "^5.0.0",
+    "redis": "^4.7.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
   }
 }

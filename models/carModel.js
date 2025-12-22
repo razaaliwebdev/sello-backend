@@ -72,6 +72,7 @@ const carSchema = new mongoose.Schema(
             type: String,
             required: false, // Handled dynamically in controller
             enum: [
+                // Car body types
                 "Roadster",
                 "Cabriolet",
                 "Super",
@@ -88,6 +89,21 @@ const carSchema = new mongoose.Schema(
                 "SUV",
                 "Pickup",
                 "Van",
+                // Bus body types
+                "School Bus",
+                "Coach",
+                "Mini Bus",
+                "Double Decker",
+                "Shuttle Bus",
+                "Transit Bus",
+                // Truck body types
+                "Flatbed",
+                "Box Truck",
+                "Dump Truck",
+                "Tow Truck",
+                "Cement Truck",
+                "Refrigerated Truck",
+                "Tanker Truck",
             ],
         },
         city: { type: String, required: true },
@@ -296,6 +312,7 @@ carSchema.index({ year: 1 });
 carSchema.index({ mileage: 1 });
 // Additional indexes for common query patterns
 carSchema.index({ make: 1, model: 1 }); // For make/model filtering
+carSchema.index({ make: 1, model: 1, year: 1 }); // For duplicate detection and filtering
 carSchema.index({ city: 1, status: 1, isApproved: 1 }); // For city-based queries
 carSchema.index({ condition: 1, status: 1, isApproved: 1 }); // For condition filtering
 carSchema.index({ fuelType: 1, status: 1, isApproved: 1 }); // For fuel type filtering
@@ -304,6 +321,10 @@ carSchema.index({ createdAt: -1 }); // For sorting by newest
 carSchema.index({ price: 1, status: 1, isApproved: 1 }); // For price range queries with status
 carSchema.index({ expiryDate: 1, status: 1 }); // For expiry queries
 carSchema.index({ postedBy: 1, status: 1 }); // For user listings by status
+// Additional compound indexes for common query patterns
+carSchema.index({ status: 1, isApproved: 1, createdAt: -1 }); // Common listing query
+carSchema.index({ city: 1, make: 1, model: 1, status: 1, isApproved: 1 }); // Location + make/model search
+carSchema.index({ status: 1, isApproved: 1, featured: -1, isBoosted: -1, boostPriority: -1, createdAt: -1 }); // Homepage listing query
 
 const Car = mongoose.model("Car", carSchema);
 

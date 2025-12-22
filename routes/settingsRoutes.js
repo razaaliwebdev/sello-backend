@@ -6,6 +6,7 @@ import {
     deleteSetting
 } from '../controllers/settingsController.js';
 import { auth, authorize } from '../middlewares/authMiddleware.js';
+import { hasPermission } from '../middlewares/permissionMiddleware.js';
 
 const router = express.Router();
 
@@ -13,11 +14,14 @@ const router = express.Router();
 router.use(auth);
 router.use(authorize('admin'));
 
+// Get routes - only need admin role
 router.get("/", getAllSettings);
 router.get("/:key", getSetting);
-router.post("/", upsertSetting);
-router.put("/:key", upsertSetting);
-router.delete("/:key", deleteSetting);
+
+// Update/Delete routes - require managePlatformSettings permission
+router.post("/", hasPermission('managePlatformSettings'), upsertSetting);
+router.put("/:key", hasPermission('managePlatformSettings'), upsertSetting);
+router.delete("/:key", hasPermission('managePlatformSettings'), deleteSetting);
 
 export default router;
 

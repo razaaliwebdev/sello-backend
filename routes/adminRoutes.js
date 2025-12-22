@@ -22,6 +22,7 @@ import {
     adminCancelSubscription
 } from '../controllers/adminPaymentController.js';
 import { auth, authorize } from '../middlewares/authMiddleware.js';
+import { hasPermission } from '../middlewares/permissionMiddleware.js';
 
 const router = express.Router();
 
@@ -29,38 +30,38 @@ const router = express.Router();
 router.use(auth);
 router.use(authorize('admin'));
 
-// Dashboard
+// Dashboard - any admin can view
 router.get("/dashboard", getDashboardStats);
 
-// User Management
-router.get("/users", getAllUsers);
-router.get("/users/:userId", getUserById);
-router.put("/users/:userId", updateUser);
-router.delete("/users/:userId", deleteUser);
-router.put("/users/:userId/verify", verifyUser);
+// User Management - require manageUsers permission
+router.get("/users", hasPermission('manageUsers'), getAllUsers);
+router.get("/users/:userId", hasPermission('manageUsers'), getUserById);
+router.put("/users/:userId", hasPermission('manageUsers'), updateUser);
+router.delete("/users/:userId", hasPermission('manageUsers'), deleteUser);
+router.put("/users/:userId/verify", hasPermission('manageUsers'), verifyUser);
 
-// Listings (Cars) Management
-router.get("/listings", getAllCars);
-router.put("/listings/:carId/approve", approveCar);
-router.put("/listings/:carId/feature", featureCar);
-router.delete("/listings/:carId", deleteCar);
-router.get("/listings/history", getListingHistory);
+// Listings (Cars) Management - require viewListings permission
+router.get("/listings", hasPermission('viewListings'), getAllCars);
+router.put("/listings/:carId/approve", hasPermission('approveListings'), approveCar);
+router.put("/listings/:carId/feature", hasPermission('featureListings'), featureCar);
+router.delete("/listings/:carId", hasPermission('deleteListings'), deleteCar);
+router.get("/listings/history", hasPermission('viewListings'), getListingHistory);
 
-// Dealer Management
-router.get("/dealers", getAllDealers);
-router.put("/dealers/:userId/verify", verifyDealer);
+// Dealer Management - require viewDealers permission
+router.get("/dealers", hasPermission('viewDealers'), getAllDealers);
+router.put("/dealers/:userId/verify", hasPermission('approveDealers'), verifyDealer);
 
-// Customer Management (same as users but filtered)
-router.get("/customers", getAllUsers); // Can filter by role=buyer in query
+// Customer Management - require manageUsers permission
+router.get("/customers", hasPermission('manageUsers'), getAllUsers);
 
-// Payment Management
-router.get("/payments", getAllPayments);
-router.get("/subscriptions", getAllSubscriptions);
-router.put("/subscriptions/:userId", adminUpdateSubscription);
-router.delete("/subscriptions/:userId", adminCancelSubscription);
+// Payment Management - require viewFinancialReports permission
+router.get("/payments", hasPermission('viewFinancialReports'), getAllPayments);
+router.get("/subscriptions", hasPermission('viewFinancialReports'), getAllSubscriptions);
+router.put("/subscriptions/:userId", hasPermission('viewFinancialReports'), adminUpdateSubscription);
+router.delete("/subscriptions/:userId", hasPermission('viewFinancialReports'), adminCancelSubscription);
 
-// Audit Logs
-router.get("/audit-logs", getAuditLogsController);
+// Audit Logs - require manageUsers permission
+router.get("/audit-logs", hasPermission('manageUsers'), getAuditLogsController);
 
 export default router;
 

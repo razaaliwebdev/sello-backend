@@ -7,6 +7,7 @@ import {
     deleteCategory
 } from '../controllers/categoryController.js';
 import { auth, authorize } from '../middlewares/authMiddleware.js';
+import { hasPermission } from '../middlewares/permissionMiddleware.js';
 import { upload } from '../middlewares/multer.js';
 
 const router = express.Router();
@@ -19,9 +20,10 @@ router.get("/:categoryId", getCategoryById);
 router.use(auth);
 router.use(authorize('admin'));
 
-router.post("/", upload.single('image'), createCategory);
-router.put("/:categoryId", upload.single('image'), updateCategory);
-router.delete("/:categoryId", deleteCategory);
+// Category management requires manageCategories permission
+router.post("/", hasPermission('manageCategories'), upload.single('image'), createCategory);
+router.put("/:categoryId", hasPermission('manageCategories'), upload.single('image'), updateCategory);
+router.delete("/:categoryId", hasPermission('manageCategories'), deleteCategory);
 
 export default router;
 

@@ -51,13 +51,38 @@ const ENV_CONFIG = {
             warning: 'Email functionality will be disabled'
         },
         // Payment
+        PAYMENT_GATEWAY: {
+            description: 'Payment gateway selection (stripe, payfast, jazzcash)',
+            default: 'stripe',
+            warning: 'Using default payment gateway: stripe'
+        },
         STRIPE_SECRET_KEY: {
             description: 'Stripe secret key',
-            warning: 'Payment functionality will be disabled'
+            warning: 'Stripe payment functionality will be disabled'
         },
         STRIPE_WEBHOOK_SECRET: {
             description: 'Stripe webhook secret',
             warning: 'Stripe webhooks will not be verified'
+        },
+        JAZZCASH_MERCHANT_ID: {
+            description: 'JazzCash merchant ID',
+            warning: 'JazzCash payment functionality will be disabled'
+        },
+        JAZZCASH_PASSWORD: {
+            description: 'JazzCash password',
+            warning: 'JazzCash payment functionality will be disabled'
+        },
+        TWILIO_ACCOUNT_SID: {
+            description: 'Twilio account SID for SMS',
+            warning: 'SMS verification will be disabled'
+        },
+        TWILIO_AUTH_TOKEN: {
+            description: 'Twilio auth token',
+            warning: 'SMS verification will be disabled'
+        },
+        TWILIO_PHONE_NUMBER: {
+            description: 'Twilio phone number',
+            warning: 'SMS verification will be disabled'
         },
         // Google OAuth
         GOOGLE_CLIENT_ID: {

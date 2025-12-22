@@ -272,7 +272,7 @@ export const register = async (req, res) => {
                     new URL(urlStr);
                     return urlStr;
                 } catch (e) {
-                    console.warn(`Invalid ${platform} URL: ${urlStr}`);
+                    Logger.warn(`Invalid ${platform} URL`, { url: urlStr, platform });
                     return null;
                 }
             };
@@ -693,13 +693,27 @@ export const forgotPassword = async (req, res) => {
         try {
             const emailResult = await sendEmail(user.email, subject, html);
 
-            // If email wasn't actually sent (dev mode), log it but still return success
+            // Check if email was actually sent
             const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
-            if (emailResult?.messageId === 'dev-mode') {
+            
+            if (emailResult?.messageId === 'dev-mode' || emailResult?.actuallySent === false) {
                 // OTP saved, email not sent in dev mode
+                Logger.warn('Forgot password email not sent (dev mode or SMTP not configured)', {
+                    email: user.email,
+                    messageId: emailResult?.messageId
+                });
+            } else if (emailResult?.actuallySent === true) {
+                Logger.info('Forgot password email sent successfully', {
+                    email: user.email,
+                    messageId: emailResult?.messageId
+                });
             }
         } catch (emailError) {
-            Logger.error("Email sending error", emailError, { email: user.email });
+            Logger.error("Email sending error", emailError, { 
+                email: user.email,
+                errorMessage: emailError.message,
+                errorCode: emailError.code
+            });
 
             // Check if SMTP is not configured
             const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || process.env.NODE_ENV === 'dev';
@@ -707,9 +721,11 @@ export const forgotPassword = async (req, res) => {
 
             // If SMTP is missing and we're in development, still return success
             if (isMissingSMTP && isDevelopment) {
-                // Continue - don't return error
+                // Continue - don't return error, OTP is saved
+                Logger.warn('SMTP not configured in development mode', { email: user.email });
             } else if (isMissingSMTP) {
                 // Production mode but SMTP not configured - still return success since OTP is saved in DB
+                Logger.warn('SMTP not configured in production mode', { email: user.email });
             } else {
                 // Other email errors - clear OTP and return error
                 user.otp = null;
@@ -888,6 +904,16 @@ export const resetPassword = async (req, res) => {
  */
 export const googleLogin = async (req, res) => {
     try {
+        // Check required environment variables first
+        if (!process.env.JWT_SECRET) {
+            Logger.error("JWT_SECRET not configured", { error: "Missing environment variable" });
+            return res.status(500).json({
+                success: false,
+                message: "Server configuration error. Please contact support.",
+                error: process.env.NODE_ENV === 'development' ? "JWT_SECRET environment variable is missing" : undefined
+            });
+        }
+
         const { token } = req.body;
 
         if (!token) {
@@ -897,8 +923,8 @@ export const googleLogin = async (req, res) => {
             });
         }
 
-        // Check if GOOGLE_CLIENT_ID is configured (use fallback in development)
-        const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
+        // Check if GOOGLE_CLIENT_ID is configured
+        const googleClientId = process.env.GOOGLE_CLIENT_ID;
 
         if (!googleClientId) {
             Logger.error("GOOGLE_CLIENT_ID not configured", { error: "Missing environment variable" });
@@ -912,19 +938,15 @@ export const googleLogin = async (req, res) => {
         // Verify Google token
         let ticket;
         try {
-            // Get the client ID (must match frontend)
-            const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
-
             // Verify the token - the audience must match the client ID used on frontend
             ticket = await client.verifyIdToken({
                 idToken: token,
                 audience: googleClientId,
             });
         } catch (verifyError) {
-            const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
             Logger.error("Google token verification error", verifyError, {
                 code: verifyError.code,
-                clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Using fallback",
+                clientId: process.env.GOOGLE_CLIENT_ID ? "Set" : "Missing",
                 expectedAudience: googleClientId
             });
 
@@ -1063,7 +1085,17 @@ export const googleLogin = async (req, res) => {
             }
         });
     } catch (error) {
-        Logger.error("Google Login Error", error);
+        // Enhanced error logging
+        Logger.error("Google Login Error", {
+            error: error.message,
+            stack: error.stack,
+            name: error.name,
+            code: error.code,
+            mongooseState: mongoose.connection.readyState,
+            hasJwtSecret: !!process.env.JWT_SECRET,
+            hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
+            errorDetails: error
+        });
 
         // Provide more specific error messages
         let errorMessage = "Google login failed. Please try again.";
@@ -1093,46 +1125,66 @@ export const googleLogin = async (req, res) => {
         } else if (mongoose.connection.readyState !== 1) {
             errorMessage = "Database is not connected. Please make sure MongoDB is running and try again.";
             statusCode = 503;
+        } else if (error.message?.includes("JWT_SECRET") || error.message?.includes("jwt") || error.name === "JsonWebTokenError") {
+            errorMessage = "Authentication configuration error. Please contact support.";
+            statusCode = 500;
+            Logger.error("JWT_SECRET missing or invalid", { hasJwtSecret: !!process.env.JWT_SECRET });
         }
 
         return res.status(statusCode).json({
             success: false,
             message: errorMessage,
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            ...(process.env.NODE_ENV === 'development' && {
+                errorName: error.name,
+                errorCode: error.code,
+                mongooseState: mongoose.connection.readyState
+            })
         });
     }
 };
 
 /**
  * Logout Controller
+ * Revokes refresh token and clears session
  */
 export const logout = async (req, res) => {
     try {
         const refreshToken = req.body.refreshToken || req.query.refreshToken;
         
-        // If refresh token is provided, revoke it
+        // Always try to revoke refresh token if provided
         if (refreshToken) {
-            await RefreshToken.updateOne(
+            const revoked = await RefreshToken.updateOne(
                 { token: refreshToken, isRevoked: false },
                 { 
                     isRevoked: true, 
                     revokedAt: new Date() 
                 }
             );
-        } else if (req.user) {
-            // If user is authenticated, revoke all their refresh tokens (optional - can be commented out)
-            // This is useful for "logout from all devices" functionality
-            // await RefreshToken.updateMany(
-            //     { userId: req.user._id, isRevoked: false },
-            //     { 
-            //         isRevoked: true, 
-            //         revokedAt: new Date() 
-            //     }
-            // );
+            
+            if (revoked.matchedCount === 0) {
+                // Token might already be revoked or expired - log but don't fail
+            }
+        }
+        
+        // If user is authenticated but no refresh token provided, try to revoke all their tokens
+        // This handles cases where refresh token wasn't sent but user wants to logout
+        if (req.user && !refreshToken) {
+            const revokedCount = await RefreshToken.updateMany(
+                { userId: req.user._id, isRevoked: false },
+                { 
+                    isRevoked: true, 
+                    revokedAt: new Date() 
+                }
+            );
         }
 
         // Clear cookie
-        res.clearCookie('token');
+        res.clearCookie('token', {
+            httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax'
+        });
 
         return res.status(200).json({
             success: true,
@@ -1185,7 +1237,6 @@ export const refreshToken = async (req, res) => {
                 await refreshTokenDoc.save();
             } catch (saveError) {
                 // Token might already be deleted by TTL, ignore save error
-                Logger.debug('Token already expired/deleted by TTL', { tokenId: refreshTokenDoc._id });
             }
             
             return res.status(401).json({
@@ -1219,8 +1270,23 @@ export const refreshToken = async (req, res) => {
             });
         }
 
+        // TOKEN ROTATION: Revoke old refresh token and generate new one
+        // This prevents token replay attacks - old token becomes invalid immediately
+        const oldRefreshToken = refreshTokenDoc.token;
+        const userAgent = req.headers['user-agent'] || refreshTokenDoc.userAgent;
+        const ipAddress = req.ip || req.connection.remoteAddress || refreshTokenDoc.ipAddress;
+        
+        // Revoke old refresh token
+        refreshTokenDoc.isRevoked = true;
+        refreshTokenDoc.revokedAt = new Date();
+        await refreshTokenDoc.save();
+
         // Generate new access token
         const accessToken = generateAccessToken(user._id, user.email);
+        
+        // Generate new refresh token (rotation)
+        const newRefreshToken = generateRefreshToken();
+        await storeRefreshToken(user._id, newRefreshToken, userAgent, ipAddress);
 
         // Set new access token in cookie
         res.cookie('token', accessToken, {
@@ -1235,7 +1301,8 @@ export const refreshToken = async (req, res) => {
             message: "Access token refreshed successfully.",
             data: {
                 accessToken: accessToken,
-                token: accessToken // For backward compatibility
+                token: accessToken, // For backward compatibility
+                refreshToken: newRefreshToken // Return new refresh token for rotation
             }
         });
     } catch (error) {
@@ -1243,6 +1310,55 @@ export const refreshToken = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to refresh token.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Logout from All Devices Controller
+ * Revokes all refresh tokens for the authenticated user
+ */
+export const logoutAllDevices = async (req, res) => {
+    try {
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({
+                success: false,
+                message: "Not authenticated."
+            });
+        }
+
+        // Revoke all refresh tokens for this user
+        const result = await RefreshToken.updateMany(
+            { userId: req.user._id, isRevoked: false },
+            { 
+                isRevoked: true, 
+                revokedAt: new Date() 
+            }
+        );
+
+        Logger.info('User logged out from all devices', { 
+            userId: req.user._id,
+            revokedCount: result.modifiedCount 
+        });
+
+        // Clear cookie
+        res.clearCookie('token', {
+            httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax'
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: `Logged out from ${result.modifiedCount} device(s) successfully.`,
+            revokedCount: result.modifiedCount
+        });
+    } catch (error) {
+        Logger.error("Logout All Devices Error", error, { userId: req.user?._id });
+        return res.status(500).json({
+            success: false,
+            message: "Failed to logout from all devices.",
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

@@ -49,6 +49,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "engineCapacity",
       "transmission",
       "regionalSpec",
+      "bodyType", // Bus body types: School Bus, Coach, Mini Bus, etc.
       "city",
       "contactNumber",
       "sellerType",
@@ -65,7 +66,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "location",
       "horsepower",
       "numberOfCylinders",
-      "geoLocation", // Made optional
+      "geoLocation",
     ],
   },
   Truck: {
@@ -80,6 +81,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "engineCapacity",
       "transmission",
       "regionalSpec",
+      "bodyType", // Truck body types: Pickup, Flatbed, Box Truck, Dump Truck, etc.
       "city",
       "contactNumber",
       "sellerType",
@@ -96,6 +98,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "location",
       "horsepower",
       "numberOfCylinders",
+      "geoLocation",
     ],
   },
   Van: {
@@ -116,7 +119,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "sellerType",
       "warranty",
       "ownerType",
-      "geoLocation",
     ],
     optional: [
       "description",
@@ -129,7 +131,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "carDoors",
       "horsepower",
       "numberOfCylinders",
-      "geoLocation", // Made optional
+      "geoLocation",
     ],
   },
   Bike: {
@@ -141,7 +143,7 @@ export const VEHICLE_FIELD_CONFIG = {
       "condition",
       "price",
       "fuelType",
-      "engineCapacity",
+      "engineCapacity", // Displacement in cc - important for motorcycles
       "transmission",
       "regionalSpec",
       "city",
@@ -159,7 +161,8 @@ export const VEHICLE_FIELD_CONFIG = {
       "features",
       "location",
       "horsepower",
-      "geoLocation", // Made optional
+      "numberOfCylinders", // Bikes can have 1, 2, 3, 4, or 6 cylinders
+      "geoLocation",
     ],
   },
   "E-bike": {
@@ -170,9 +173,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "year",
       "condition",
       "price",
-      "fuelType",
-      "transmission",
-      "regionalSpec",
       "city",
       "contactNumber",
       "sellerType",
@@ -189,7 +189,10 @@ export const VEHICLE_FIELD_CONFIG = {
       "location",
       "batteryRange",
       "motorPower",
-      "geoLocation", // Made optional
+      "fuelType", // E-bikes are electric, but some might want to specify
+      "transmission", // E-bikes may have gears
+      "regionalSpec",
+      "geoLocation",
     ],
   },
 };
