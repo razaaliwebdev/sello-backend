@@ -97,15 +97,9 @@ export const sendVerificationCode = async (phoneNumber, code) => {
                 }
             }
         } else {
-            // Fallback: Log code for development (REMOVE IN PRODUCTION)
-            const missingVars = [];
-            if (!twilioAccountSid) missingVars.push('TWILIO_ACCOUNT_SID');
-            if (!twilioAuthToken) missingVars.push('TWILIO_AUTH_TOKEN');
-            if (!twilioPhoneNumber) missingVars.push('TWILIO_PHONE_NUMBER');
-
-            Logger.warn(`SMS verification code for ${normalizedPhone.substring(0, 4) + '****'}: ${code}`, {
-                message: 'Twilio not configured. Code logged for development only.',
-                missingVars,
+            // Fallback: Log code for development (SMS service not configured)
+            Logger.info(`SMS verification code for ${normalizedPhone.substring(0, 4) + '****'}: ${code}`, {
+                message: 'SMS service not configured. Code logged for development only.',
                 phoneNumber: normalizedPhone.substring(0, 4) + '****',
                 code
             });

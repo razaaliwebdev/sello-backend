@@ -21,6 +21,7 @@ import dotenv from "dotenv";
 import Car from "../models/carModel.js";
 import User from "../models/userModel.js";
 import ListingHistory from "../models/listingHistoryModel.js";
+import { deleteCloudinaryImages } from "../utils/cloudinary.js";
 
 dotenv.config();
 
@@ -57,6 +58,21 @@ const runAutoDelete = async () => {
     try {
       for (const car of carsToDelete) {
         const deletedAt = new Date();
+
+        // Delete images from Cloudinary before deleting car
+        if (car.images && Array.isArray(car.images) && car.images.length > 0) {
+          try {
+            const deleteResult = await deleteCloudinaryImages(car.images);
+            console.log(`  ✅ Deleted ${deleteResult.deleted.length} images from Cloudinary for car ${car._id}`);
+            
+            if (deleteResult.failed.length > 0) {
+              console.warn(`  ⚠️  Failed to delete ${deleteResult.failed.length} images from Cloudinary for car ${car._id}`);
+            }
+          } catch (imageError) {
+            console.error(`  ❌ Error deleting images from Cloudinary for car ${car._id}:`, imageError.message);
+            // Continue with deletion even if image deletion fails
+          }
+        }
 
         // Create history record (no images)
         await ListingHistory.create(

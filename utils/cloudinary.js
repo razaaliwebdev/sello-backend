@@ -66,7 +66,94 @@ export const uploadCloudinary = (fileBuffer, options = {}) => {
     });
 };
 
+/**
+ * Delete image(s) from Cloudinary
+ * @param {String|Array<String>} imageUrls - Single URL or array of URLs to delete
+ * @returns {Promise<Object>} Deletion result
+ */
+export const deleteCloudinaryImages = async (imageUrls) => {
+    try {
+        if (!imageUrls || (Array.isArray(imageUrls) && imageUrls.length === 0)) {
+            return { deleted: [], failed: [] };
+        }
 
+        // Normalize to array
+        const urls = Array.isArray(imageUrls) ? imageUrls : [imageUrls];
+        
+        // Extract public IDs from Cloudinary URLs
+        const extractPublicId = (url) => {
+            if (!url || typeof url !== 'string') return null;
+            
+            try {
+                // Cloudinary URL format: https://res.cloudinary.com/{cloud_name}/image/upload/{version}/{public_id}.{format}
+                // Or: https://res.cloudinary.com/{cloud_name}/image/upload/{folder}/{public_id}.{format}
+                const urlParts = url.split('/');
+                const uploadIndex = urlParts.findIndex(part => part === 'upload');
+                
+                if (uploadIndex === -1) return null;
+                
+                // Get everything after 'upload' and before the file extension
+                const pathAfterUpload = urlParts.slice(uploadIndex + 1).join('/');
+                const publicId = pathAfterUpload.replace(/\.[^/.]+$/, ''); // Remove file extension
+                
+                return publicId;
+            } catch (error) {
+                Logger.warn("Failed to extract public ID from URL", { url, error: error.message });
+                return null;
+            }
+        };
+
+        const publicIds = urls
+            .map(extractPublicId)
+            .filter(id => id !== null);
+
+        if (publicIds.length === 0) {
+            Logger.warn("No valid Cloudinary public IDs found in URLs", { urls });
+            return { deleted: [], failed: urls };
+        }
+
+        // Delete images in batch (Cloudinary supports up to 100 at a time)
+        const batchSize = 100;
+        const deleted = [];
+        const failed = [];
+
+        for (let i = 0; i < publicIds.length; i += batchSize) {
+            const batch = publicIds.slice(i, i + batchSize);
+            
+            try {
+                const result = await cloudinary.api.delete_resources(batch, {
+                    resource_type: 'image',
+                    type: 'upload'
+                });
+
+                // Cloudinary returns { deleted: { [publicId]: "deleted" }, failed: { [publicId]: "not_found" } }
+                if (result.deleted) {
+                    Object.keys(result.deleted).forEach(publicId => {
+                        deleted.push(publicId);
+                    });
+                }
+
+                if (result.failed && Object.keys(result.failed).length > 0) {
+                    Object.keys(result.failed).forEach(publicId => {
+                        failed.push(publicId);
+                        Logger.warn("Failed to delete image from Cloudinary", { 
+                            publicId, 
+                            reason: result.failed[publicId] 
+                        });
+                    });
+                }
+            } catch (error) {
+                Logger.error("Error deleting batch from Cloudinary", error, { batch });
+                failed.push(...batch);
+            }
+        }
+
+        return { deleted, failed };
+    } catch (error) {
+        Logger.error("Error in deleteCloudinaryImages", error, { imageUrls });
+        return { deleted: [], failed: Array.isArray(imageUrls) ? imageUrls : [imageUrls] };
+    }
+};
 
 import fs from 'fs';
 

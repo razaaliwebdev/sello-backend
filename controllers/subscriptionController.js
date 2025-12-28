@@ -4,17 +4,20 @@ import SubscriptionPlan from '../models/subscriptionPlanModel.js';
 import Settings from '../models/settingsModel.js';
 
 // Legacy hardcoded plans (fallback)
+// NOTE: We set `free` to unlimited listings for the initial phase.
+// In production with real paid plans, you can change `maxListings` for `free`
+// back to a limited number (e.g. 5 or 10) if you want to enforce limits.
 const LEGACY_PLANS = {
     free: {
         name: "Free",
         price: 0,
-        duration: 0, // days
+        duration: 0, // days (lifetime / no expiry)
         features: [
-            "Basic listing",
-            "5 active listings",
+            "Unlimited listings",
             "Standard support"
         ],
-        maxListings: 5,
+        // -1 means unlimited listings (initial phase: everything is free)
+        maxListings: -1,
         boostCredits: 0
     },
     basic: {

@@ -279,14 +279,14 @@ export const initializeSocket = (server) => {
                             const recipientUser = recipientsMap.get(recipientId);
                             if (!recipientUser) continue;
 
-                            // Skip admin system notifications here – focus on buyer/seller/dealer
-                            if (recipientUser.role === 'admin') continue;
-
                             let title = 'New Message';
                             let messageText = '';
                             let actionUrl = '';
 
                             if (chat.chatType === 'car') {
+                                // Skip admin system notifications for car chats – focus on buyer/seller/dealer
+                                if (recipientUser.role === 'admin') continue;
+
                                 const listingTitle = car?.title || 'your listing';
 
                                 // If this recipient is the listing owner (seller/dealer)
@@ -304,8 +304,15 @@ export const initializeSocket = (server) => {
                                 }
                             } else {
                                 // Support chat
-                                messageText = `${socket.user.name} sent you a support message`;
-                                actionUrl = `/support?chatId=${chatId}`;
+                                if (recipientUser.role === 'admin') {
+                                    // Admin receives support chat notification - direct to admin support chatbot
+                                    messageText = `${socket.user.name} sent you a support message`;
+                                    actionUrl = `/admin/support-chatbot/${chatId}`;
+                                } else {
+                                    // Regular user receives support chat notification
+                                    messageText = `${socket.user.name} sent you a support message`;
+                                    actionUrl = `/support?chatId=${chatId}`;
+                                }
                             }
 
                             // Create Notification document

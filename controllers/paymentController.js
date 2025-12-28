@@ -20,12 +20,12 @@ if (process.env.STRIPE_SECRET_KEY) {
     Logger.warn('STRIPE_SECRET_KEY not set. Stripe payment features will be disabled.');
 }
 
-// Get payment gateway from environment
+// Get payment gateway from environment (currently only Stripe is supported in this setup)
 const PAYMENT_GATEWAY = (process.env.PAYMENT_GATEWAY || 'stripe').toLowerCase();
 
 /**
  * Create Checkout Session for Subscription
- * Supports multiple payment gateways: Stripe, JazzCash
+ * Supports Stripe payment gateway
  */
 export const createSubscriptionCheckout = async (req, res) => {
     try {
@@ -40,12 +40,60 @@ export const createSubscriptionCheckout = async (req, res) => {
 
         const selectedPlan = SUBSCRIPTION_PLANS[plan];
         const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
 
         // Check if user already has an active subscription
-        if (user.subscription.isActive && user.subscription.plan === plan) {
+        if (user.subscription && user.subscription.isActive && user.subscription.plan === plan) {
             return res.status(400).json({
                 success: false,
                 message: `You already have an active ${plan} subscription`
+            });
+        }
+
+        // Helper to activate subscription locally without external payment
+        const activateSubscriptionLocally = (withExpiry = true, reason = 'local_activation') => {
+            const now = new Date();
+            user.subscription = user.subscription || {};
+            user.subscription.isActive = true;
+            user.subscription.plan = plan;
+            user.subscription.startDate = now;
+
+            if (withExpiry && selectedPlan.duration && selectedPlan.duration > 0) {
+                const endDate = new Date(now);
+                endDate.setDate(endDate.getDate() + selectedPlan.duration);
+                user.subscription.endDate = endDate;
+            } else {
+                // lifetime / no expiry
+                user.subscription.endDate = null;
+            }
+
+            user.subscription.autoRenew = !!autoRenew;
+
+            return {
+                reason,
+                autoRenew: !!autoRenew,
+            };
+        };
+
+        // If plan is free or price is 0, activate without external payment
+        if (!selectedPlan.price || selectedPlan.price <= 0) {
+            const { reason, autoRenew: localAutoRenew } = activateSubscriptionLocally(false, 'free_plan');
+            await user.save();
+
+            return res.status(200).json({
+                success: true,
+                message: `${selectedPlan.name} plan activated successfully without payment.`,
+                data: {
+                    plan: plan,
+                    autoRenew: localAutoRenew,
+                    paymentRequired: false,
+                    reason
+                }
             });
         }
 
@@ -59,93 +107,68 @@ export const createSubscriptionCheckout = async (req, res) => {
             });
         }
 
-        // Handle different payment gateways
-        if (PAYMENT_GATEWAY === 'jazzcash') {
-            // JazzCash integration
-            const returnUrl = `${process.env.FRONTEND_URL || clientUrl}/subscription/success`;
-            const paymentIntent = await createPaymentIntent(
-                selectedPlan.price,
-                'PKR',
-                {
-                    userId: user._id.toString(),
-                    plan: plan,
-                    autoRenew: autoRenew.toString(),
-                    purpose: 'subscription',
-                    description: `${selectedPlan.name} Subscription`,
-                    returnUrl: returnUrl,
-                    billReference: `SUB-${user._id}-${Date.now()}`
-                }
-            );
-
-            return res.status(200).json({
-                success: true,
-                data: {
-                    sessionId: paymentIntent.id,
-                    paymentUrl: paymentIntent.payment_url,
-                    paymentData: paymentIntent.payment_data,
-                    gateway: 'jazzcash'
-                }
-            });
-        } else {
-            // Stripe integration (default)
-            if (!stripe) {
-                return res.status(503).json({
-                    success: false,
-                    message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
-                });
-            }
-
-            const session = await stripe.checkout.sessions.create({
-                payment_method_types: ['card'],
-                line_items: [
-                    {
-                        price_data: {
-                            currency: 'usd',
-                            product_data: {
-                                name: `${selectedPlan.name} Subscription`,
-                                description: selectedPlan.features.join(', ')
-                            },
-                            unit_amount: Math.round(selectedPlan.price * 100), // Convert to cents
-                            recurring: autoRenew ? {
-                                interval: 'month'
-                            } : undefined
-                        },
-                        quantity: 1,
-                    },
-                ],
-                mode: autoRenew ? 'subscription' : 'payment',
-                success_url: `${clientUrl}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${clientUrl}/profile`,
-                customer_email: user.email,
-                metadata: {
-                    userId: user._id.toString(),
-                    plan: plan,
-                    autoRenew: autoRenew.toString()
-                }
-            });
-
-            return res.status(200).json({
-                success: true,
-                data: {
-                    sessionId: session.id,
-                    url: session.url,
-                    gateway: 'stripe'
-                }
+        // Stripe integration (only gateway used in this project)
+        if (!stripe) {
+            Logger.error('Stripe payment requested but STRIPE_SECRET_KEY is not set.');
+            return res.status(503).json({
+                success: false,
+                message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
             });
         }
+
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'usd',
+                        product_data: {
+                            name: `${selectedPlan.name} Subscription`,
+                            description: selectedPlan.features.join(', ')
+                        },
+                        unit_amount: Math.round(selectedPlan.price * 100), // Convert to cents
+                        recurring: autoRenew ? {
+                            interval: 'month'
+                        } : undefined
+                    },
+                    quantity: 1,
+                },
+            ],
+            mode: autoRenew ? 'subscription' : 'payment',
+            success_url: `${clientUrl}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${clientUrl}/profile`,
+            customer_email: user.email,
+            metadata: {
+                userId: user._id.toString(),
+                plan: plan,
+                autoRenew: autoRenew.toString()
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                sessionId: session.id,
+                url: session.url,
+                gateway: 'stripe'
+            }
+        });
     } catch (error) {
+        const isProd = process.env.NODE_ENV === 'production';
         Logger.error('Create Subscription Checkout Error:', error);
+
         return res.status(500).json({
             success: false,
             message: 'Error creating checkout session',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            // Always include details in non-production to help debugging
+            error: isProd ? undefined : (error && (error.stack || error.message || String(error)))
         });
     }
 };
 
 /**
  * Create Checkout Session for Boost
- * Supports multiple payment gateways: Stripe, JazzCash
+ * Supports Stripe payment gateway
  */
 export const createBoostCheckout = async (req, res) => {
     try {
@@ -205,78 +228,50 @@ export const createBoostCheckout = async (req, res) => {
 
         const boostCost = 5 * duration; // $5 per day
 
-        // Handle different payment gateways
-        if (PAYMENT_GATEWAY === 'jazzcash') {
-            // JazzCash integration
-            const returnUrl = `${process.env.FRONTEND_URL || clientUrl}/boost/success`;
-            const paymentIntent = await createPaymentIntent(
-                boostCost,
-                'PKR',
-                {
-                    userId: req.user._id.toString(),
-                    carId: carId,
-                    duration: duration.toString(),
-                    purpose: 'boost',
-                    description: `Boost Post for ${duration} days`,
-                    returnUrl: returnUrl,
-                    billReference: `BOOST-${carId}-${Date.now()}`
-                }
-            );
-
-            return res.status(200).json({
-                success: true,
-                data: {
-                    sessionId: paymentIntent.id,
-                    paymentUrl: paymentIntent.payment_url,
-                    paymentData: paymentIntent.payment_data,
-                    gateway: 'jazzcash'
-                }
-            });
-        } else {
-            // Stripe integration (default)
-            if (!stripe) {
-                return res.status(503).json({
-                    success: false,
-                    message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
-                });
-            }
-
-            const session = await stripe.checkout.sessions.create({
-                payment_method_types: ['card'],
-                line_items: [
-                    {
-                        price_data: {
-                            currency: 'usd',
-                            product_data: {
-                                name: `Boost Post for ${duration} days`,
-                                description: `Promote your car listing to the top for ${duration} days`
-                            },
-                            unit_amount: Math.round(boostCost * 100), // Convert to cents
-                        },
-                        quantity: 1,
-                    },
-                ],
-                mode: 'payment',
-                success_url: `${clientUrl}/boost/success?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${clientUrl}/my-listings`,
-                customer_email: req.user.email,
-                metadata: {
-                    userId: req.user._id.toString(),
-                    carId: carId,
-                    duration: duration.toString(),
-                    purpose: 'boost'
-                }
-            });
-
-            return res.status(200).json({
-                success: true,
-                data: {
-                    sessionId: session.id,
-                    url: session.url,
-                    gateway: 'stripe'
-                }
+        // Stripe integration (only gateway used in this project)
+        if (!stripe) {
+            Logger.error('Stripe boost payment requested but STRIPE_SECRET_KEY is not set.');
+            return res.status(503).json({
+                success: false,
+                message: 'Payment service is not configured. Please set STRIPE_SECRET_KEY in environment variables.'
             });
         }
+
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'usd',
+                        product_data: {
+                            name: `Boost Post for ${duration} days`,
+                            description: `Promote your car listing to the top for ${duration} days`
+                        },
+                        unit_amount: Math.round(boostCost * 100), // Convert to cents
+                    },
+                    quantity: 1,
+                },
+            ],
+            mode: 'payment',
+            success_url: `${clientUrl}/boost/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${clientUrl}/my-listings`,
+            customer_email: req.user.email,
+            metadata: {
+                userId: req.user._id.toString(),
+                carId: carId,
+                duration: duration.toString(),
+                purpose: 'boost'
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                sessionId: session.id,
+                url: session.url,
+                gateway: 'stripe'
+            }
+        });
     } catch (error) {
         Logger.error('Create Boost Checkout Error:', error);
         return res.status(500).json({
@@ -289,8 +284,10 @@ export const createBoostCheckout = async (req, res) => {
 
 /**
  * JazzCash Webhook/Callback Handler
+ * NOTE: JazzCash is not used - only Stripe is supported
+ * This function is kept for reference but not exported
  */
-export const jazzcashWebhook = async (req, res) => {
+const jazzcashWebhook = async (req, res) => {
     try {
         const callbackData = req.body;
         

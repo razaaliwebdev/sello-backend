@@ -784,6 +784,29 @@ export const deleteCar = async (req, res) => {
             });
         }
 
+        // Delete images from Cloudinary before deleting car
+        if (car.images && Array.isArray(car.images) && car.images.length > 0) {
+            try {
+                const { deleteCloudinaryImages } = await import('../utils/cloudinary.js');
+                const deleteResult = await deleteCloudinaryImages(car.images);
+                Logger.info("Deleted car images from Cloudinary (admin delete)", { 
+                    carId, 
+                    deleted: deleteResult.deleted.length,
+                    failed: deleteResult.failed.length 
+                });
+                
+                if (deleteResult.failed.length > 0) {
+                    Logger.warn("Some images failed to delete from Cloudinary (admin delete)", { 
+                        carId, 
+                        failed: deleteResult.failed 
+                    });
+                }
+            } catch (imageError) {
+                Logger.error("Error deleting images from Cloudinary (admin delete)", imageError, { carId });
+                // Continue with deletion even if image deletion fails
+            }
+        }
+
         // Create history record BEFORE deletion (no images)
         try {
             await ListingHistory.create({

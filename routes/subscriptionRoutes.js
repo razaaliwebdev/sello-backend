@@ -10,7 +10,6 @@ import {
     createSubscriptionCheckout,
     createBoostCheckout,
     stripeWebhook,
-    jazzcashWebhook,
     verifyPaymentSession
 } from '../controllers/paymentController.js';
 import { auth } from '../middlewares/authMiddleware.js';
@@ -23,8 +22,6 @@ router.get("/plans", getSubscriptionPlans);
 // Payment webhooks (must be before auth middleware)
 // Stripe webhook (uses raw body)
 router.post("/webhook/stripe", express.raw({ type: 'application/json' }), stripeWebhook);
-// JazzCash webhook/callback (uses form data)
-router.post("/webhook/jazzcash", express.urlencoded({ extended: true }), jazzcashWebhook);
 // Generic webhook route for backward compatibility (defaults to Stripe)
 router.post("/webhook", express.raw({ type: 'application/json' }), stripeWebhook);
 

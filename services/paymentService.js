@@ -1,6 +1,6 @@
 /**
  * Payment Service
- * Supports multiple payment gateways: Stripe, PayFast, JazzCash
+ * Supports Stripe payment gateway
  * Configure via environment variables
  */
 
@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 dotenv.config();
 
-const PAYMENT_GATEWAY = process.env.PAYMENT_GATEWAY || 'stripe'; // stripe, payfast, jazzcash
+const PAYMENT_GATEWAY = process.env.PAYMENT_GATEWAY || 'stripe'; // stripe only
 
 /**
  * Create Payment Intent
@@ -24,8 +24,6 @@ export const createPaymentIntent = async (amount, currency = "USD", metadata = {
                 return await createStripePaymentIntent(amount, currency, metadata);
             case 'payfast':
                 return await createPayFastPaymentIntent(amount, currency, metadata);
-            case 'jazzcash':
-                return await createJazzCashPaymentIntent(amount, currency, metadata);
             default:
                 // Fallback to Stripe
                 return await createStripePaymentIntent(amount, currency, metadata);
@@ -50,8 +48,6 @@ export const confirmPayment = async (paymentIntentId, paymentMethodId) => {
                 return await confirmStripePayment(paymentIntentId, paymentMethodId);
             case 'payfast':
                 return await confirmPayFastPayment(paymentIntentId, paymentMethodId);
-            case 'jazzcash':
-                return await confirmJazzCashPayment(paymentIntentId, paymentMethodId);
             default:
                 return await confirmStripePayment(paymentIntentId, paymentMethodId);
         }
@@ -162,6 +158,8 @@ const confirmPayFastPayment = async (paymentIntentId, paymentMethodId) => {
 
 /**
  * JazzCash Payment Implementation
+ * NOTE: JazzCash is not used - only Stripe is supported
+ * This function is kept for reference but not called
  */
 const createJazzCashPaymentIntent = async (amount, currency, metadata) => {
     if (!process.env.JAZZCASH_MERCHANT_ID || !process.env.JAZZCASH_PASSWORD) {
@@ -227,8 +225,9 @@ const createJazzCashPaymentIntent = async (amount, currency, metadata) => {
 };
 
 const confirmJazzCashPayment = async (paymentIntentId, paymentMethodId) => {
+    // NOTE: JazzCash is not used - only Stripe is supported
     // JazzCash confirmation is handled via webhook/callback
-    // This function is kept for compatibility
+    // This function is kept for reference but not called
     return {
         id: paymentIntentId,
         status: "pending",
@@ -324,8 +323,6 @@ export const verifyPayment = async (transactionId) => {
                 return await verifyStripePayment(transactionId);
             case 'payfast':
                 return await verifyPayFastPayment(transactionId);
-            case 'jazzcash':
-                return await verifyJazzCashPayment(transactionId);
             default:
                 return await verifyStripePayment(transactionId);
         }
@@ -369,6 +366,10 @@ const verifyPayFastPayment = async (transactionId) => {
     };
 };
 
+/**
+ * NOTE: JazzCash is not used - only Stripe is supported
+ * This function is kept for reference but not called
+ */
 const verifyJazzCashPayment = async (transactionId, callbackData = null) => {
     if (!process.env.JAZZCASH_MERCHANT_ID || !process.env.JAZZCASH_PASSWORD) {
         throw new Error('JazzCash credentials not configured');

@@ -38,10 +38,12 @@ const generateRefreshToken = () => {
 /**
  * Store Refresh Token in Database
  */
-const storeRefreshToken = async (userId, refreshToken, userAgent, ipAddress) => {
+const storeRefreshToken = async (userId, refreshToken, userAgent, ipAddress, ttlDays = 7) => {
     try {
         const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 7); // 7 days from now
+        // Default 7 days, but allow custom TTL (e.g. 30 days for "Remember me")
+        const days = Number(ttlDays) && Number(ttlDays) > 0 ? Number(ttlDays) : 7;
+        expiresAt.setDate(expiresAt.getDate() + days);
 
         await RefreshToken.create({
             token: refreshToken,
@@ -64,16 +66,16 @@ const storeRefreshToken = async (userId, refreshToken, userAgent, ipAddress) => 
 
 /**
  * Generate both tokens and store refresh token
- * Returns { accessToken, refreshToken }
+ * Returns { accessToken, refreshToken, ttlDays }
  */
-const generateTokens = async (userId, email, userAgent, ipAddress) => {
+const generateTokens = async (userId, email, userAgent, ipAddress, ttlDays = 7) => {
     const accessToken = generateAccessToken(userId, email);
     const refreshToken = generateRefreshToken();
     
-    // Store refresh token in database
-    await storeRefreshToken(userId, refreshToken, userAgent, ipAddress);
+    // Store refresh token in database with configurable lifetime
+    await storeRefreshToken(userId, refreshToken, userAgent, ipAddress, ttlDays);
     
-    return { accessToken, refreshToken };
+    return { accessToken, refreshToken, ttlDays };
 };
 
 /**
@@ -432,14 +434,28 @@ export const register = async (req, res) => {
         // Generate both access and refresh tokens
         const userAgent = req.headers['user-agent'] || null;
         const ipAddress = req.ip || req.connection.remoteAddress || null;
-        const { accessToken, refreshToken } = await generateTokens(user._id, user.email, userAgent, ipAddress);
+        const { accessToken, refreshToken, ttlDays } = await generateTokens(
+            user._id,
+            user.email,
+            userAgent,
+            ipAddress
+        );
 
         // Set access token in cookie as well (for compatibility)
         res.cookie('token', accessToken, {
-            httpOnly: false, // Allow client-side access
+            httpOnly: false, // Allow client-side access to JWT (Authorization header still primary)
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
             maxAge: 15 * 60 * 1000 // 15 minutes (access token lifetime)
+        });
+
+        // Set refresh token in httpOnly cookie (primary storage, not exposed to JS)
+        const refreshMaxAgeMs = (Number(ttlDays) || 7) * 24 * 60 * 60 * 1000;
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: refreshMaxAgeMs
         });
 
         // Return response (exclude sensitive data)
@@ -458,8 +474,8 @@ export const register = async (req, res) => {
                     isEmailVerified: user.isEmailVerified
                 },
                 token: accessToken, // For backward compatibility
-                accessToken: accessToken,
-                refreshToken: refreshToken
+                accessToken: accessToken
+                // refreshToken is now stored in httpOnly cookie and not returned to client
             }
         });
     } catch (error) {
@@ -486,7 +502,7 @@ export const register = async (req, res) => {
  */
 export const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, rememberMe } = req.body;
 
         // Validation
         if (!email || !password) {
@@ -554,7 +570,15 @@ export const login = async (req, res) => {
         // Generate both access and refresh tokens
         const userAgent = req.headers['user-agent'] || null;
         const ipAddress = req.ip || req.connection.remoteAddress || null;
-        const { accessToken, refreshToken } = await generateTokens(user._id, user.email, userAgent, ipAddress);
+        // If rememberMe is true, extend refresh token lifetime to 30 days
+        const refreshTtlDays = rememberMe ? 30 : 7;
+        const { accessToken, refreshToken, ttlDays } = await generateTokens(
+            user._id,
+            user.email,
+            userAgent,
+            ipAddress,
+            refreshTtlDays
+        );
 
         // Set access token in cookie as well (for compatibility)
         res.cookie('token', accessToken, {
@@ -562,6 +586,15 @@ export const login = async (req, res) => {
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
             maxAge: 15 * 60 * 1000 // 15 minutes (access token lifetime)
+        });
+
+        // Set refresh token in httpOnly cookie
+        const refreshMaxAgeMs = (Number(ttlDays) || refreshTtlDays) * 24 * 60 * 60 * 1000;
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: refreshMaxAgeMs
         });
 
         // Return response with both tokens
@@ -585,8 +618,8 @@ export const login = async (req, res) => {
                     dealerInfo: user.dealerInfo || null
                 },
                 token: accessToken, // For backward compatibility
-                accessToken: accessToken,
-                refreshToken: refreshToken
+                accessToken: accessToken
+                // refreshToken is now stored in httpOnly cookie and not returned to client
             }
         });
     } catch (error) {
@@ -736,8 +769,11 @@ export const forgotPassword = async (req, res) => {
                 let errorMessage = emailError.message || "Failed to send OTP.";
                 let statusCode = 500;
                 
-                // If it's the specific App Password error, make sure it's clear and return 502
-                if (emailError.message.includes("App Password") || emailError.message.includes("authentication failed")) {
+                // If it's an SMTP authentication error, return 502 (Bad Gateway)
+                if (emailError.message.includes("authentication failed") || 
+                    emailError.message.includes("Authentication Failed") ||
+                    emailError.message.includes("Invalid credentials") ||
+                    emailError.responseCode === 535) {
                    errorMessage = "Email failed: " + emailError.message;
                    statusCode = 502; // Bad Gateway (Upstream error)
                 } else if (emailError.message.includes("SMTP")) {
@@ -1053,7 +1089,12 @@ export const googleLogin = async (req, res) => {
         // Generate both access and refresh tokens
         const userAgent = req.headers['user-agent'] || null;
         const ipAddress = req.ip || req.connection.remoteAddress || null;
-        const { accessToken, refreshToken } = await generateTokens(user._id, user.email, userAgent, ipAddress);
+        const { accessToken, refreshToken, ttlDays } = await generateTokens(
+            user._id,
+            user.email,
+            userAgent,
+            ipAddress
+        );
 
         // Set access token in cookie as well (for compatibility)
         res.cookie('token', accessToken, {
@@ -1061,6 +1102,15 @@ export const googleLogin = async (req, res) => {
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
             maxAge: 15 * 60 * 1000 // 15 minutes (access token lifetime)
+        });
+
+        // Set refresh token in httpOnly cookie
+        const refreshMaxAgeMs = (Number(ttlDays) || 7) * 24 * 60 * 60 * 1000;
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: refreshMaxAgeMs
         });
 
         return res.status(200).json({
@@ -1080,8 +1130,8 @@ export const googleLogin = async (req, res) => {
                     roleId: user.roleId
                 },
                 token: accessToken, // For backward compatibility
-                accessToken: accessToken,
-                refreshToken: refreshToken
+                accessToken: accessToken
+                // refreshToken is now stored in httpOnly cookie and not returned to client
             }
         });
     } catch (error) {
@@ -1150,7 +1200,7 @@ export const googleLogin = async (req, res) => {
  */
 export const logout = async (req, res) => {
     try {
-        const refreshToken = req.body.refreshToken || req.query.refreshToken;
+        const refreshToken = req.body.refreshToken || req.query.refreshToken || req.cookies?.refreshToken;
         
         // Always try to revoke refresh token if provided
         if (refreshToken) {
@@ -1179,9 +1229,14 @@ export const logout = async (req, res) => {
             );
         }
 
-        // Clear cookie
+        // Clear cookies
         res.clearCookie('token', {
             httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax'
+        });
+        res.clearCookie('refreshToken', {
+            httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax'
         });
@@ -1205,7 +1260,8 @@ export const logout = async (req, res) => {
  */
 export const refreshToken = async (req, res) => {
     try {
-        const { refreshToken: token } = req.body;
+        // Prefer body/query token for backward compatibility, but primarily use httpOnly cookie
+        const token = req.body.refreshToken || req.query.refreshToken || req.cookies?.refreshToken;
 
         if (!token) {
             return res.status(400).json({
@@ -1286,7 +1342,10 @@ export const refreshToken = async (req, res) => {
         
         // Generate new refresh token (rotation)
         const newRefreshToken = generateRefreshToken();
-        await storeRefreshToken(user._id, newRefreshToken, userAgent, ipAddress);
+        // Use same TTL as original token (days between now and expiresAt)
+        const ttlMs = refreshTokenDoc.expiresAt.getTime() - Date.now();
+        const ttlDays = ttlMs > 0 ? Math.ceil(ttlMs / (24 * 60 * 60 * 1000)) : 7;
+        await storeRefreshToken(user._id, newRefreshToken, userAgent, ipAddress, ttlDays);
 
         // Set new access token in cookie
         res.cookie('token', accessToken, {
@@ -1296,13 +1355,22 @@ export const refreshToken = async (req, res) => {
             maxAge: 15 * 60 * 1000 // 15 minutes
         });
 
+        // Rotate refresh token cookie as well
+        const refreshMaxAgeMs = ttlDays * 24 * 60 * 60 * 1000;
+        res.cookie('refreshToken', newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: refreshMaxAgeMs
+        });
+
         return res.status(200).json({
             success: true,
             message: "Access token refreshed successfully.",
             data: {
                 accessToken: accessToken,
-                token: accessToken, // For backward compatibility
-                refreshToken: newRefreshToken // Return new refresh token for rotation
+                token: accessToken // For backward compatibility
+                // refreshToken is now stored in httpOnly cookie and not returned to client
             }
         });
     } catch (error) {
@@ -1345,6 +1413,11 @@ export const logoutAllDevices = async (req, res) => {
         // Clear cookie
         res.clearCookie('token', {
             httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax'
+        });
+        res.clearCookie('refreshToken', {
+            httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax'
         });

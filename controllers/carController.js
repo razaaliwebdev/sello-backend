@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import Car from "../models/carModel.js";
 import ListingHistory from "../models/listingHistoryModel.js";
-import { uploadCloudinary } from '../utils/cloudinary.js'
+import { uploadCloudinary, deleteCloudinaryImages } from '../utils/cloudinary.js'
 import User from '../models/userModel.js';
 import { parseArray, buildCarQuery } from '../utils/parseArray.js';
 import Logger from '../utils/logger.js';
@@ -191,9 +191,9 @@ export const createCar = async (req, res) => {
             }
         }
         
-        // Use default location (Dubai, UAE) if geoLocation is not provided
+        // Use default location (Lahore, Pakistan) if geoLocation is not provided
         if (!parsedGeoLocation) {
-            parsedGeoLocation = [55.2708, 25.2048]; // [longitude, latitude] for Dubai, UAE
+            parsedGeoLocation = [74.3587, 31.5204]; // [longitude, latitude] for Lahore, Pakistan
         }
 
         // Check for potential duplicate listings (unless force=true)
@@ -762,6 +762,56 @@ export const deleteCar = async (req, res) => {
                 message: "You are not authorized to delete this car."
             })
         };
+
+        // Delete images from Cloudinary before deleting car
+        if (car.images && Array.isArray(car.images) && car.images.length > 0) {
+            try {
+                const deleteResult = await deleteCloudinaryImages(car.images);
+                Logger.info("Deleted car images from Cloudinary", { 
+                    carId: id, 
+                    deleted: deleteResult.deleted.length,
+                    failed: deleteResult.failed.length 
+                });
+                
+                if (deleteResult.failed.length > 0) {
+                    Logger.warn("Some images failed to delete from Cloudinary", { 
+                        carId: id, 
+                        failed: deleteResult.failed 
+                    });
+                }
+            } catch (imageError) {
+                Logger.error("Error deleting images from Cloudinary", imageError, { carId: id });
+                // Continue with deletion even if image deletion fails
+            }
+        }
+
+        // Create history record BEFORE deletion (no images)
+        try {
+            await ListingHistory.create({
+                oldListingId: car._id,
+                title: car.title,
+                make: car.make,
+                model: car.model,
+                year: car.year,
+                mileage: car.mileage,
+                finalStatus: car.isSold ? "sold" : "deleted",
+                finalSellingDate: car.soldAt || car.soldDate || null,
+                sellerUser: car.postedBy,
+                isAutoDeleted: false,
+                deletedBy: req.user._id,
+                deletedAt: new Date(),
+            });
+        } catch (historyError) {
+            Logger.error("Failed to create listing history on delete", historyError, { carId: id });
+            // Do not block deletion if history fails, but log it
+        }
+
+        // Remove car from user's carsPosted array
+        if (car.postedBy) {
+            await User.findByIdAndUpdate(car.postedBy, {
+                $pull: { carsPosted: id },
+            });
+        }
 
         await car.deleteOne();
 

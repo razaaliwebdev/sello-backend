@@ -583,18 +583,18 @@ export const inviteUser = async (req, res) => {
                 <title>Admin Panel Invitation</title>
             </head>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background-color: #4F46E5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                <div style="background: linear-gradient(135deg, #FFA602 0%, #FF6B00 100%); color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
                     <h1 style="margin: 0; font-size: 24px;">Admin Panel Invitation</h1>
                 </div>
                 <div style="background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
                     <p style="font-size: 16px; margin-top: 0;">Hello <strong>${fullName}</strong>,</p>
                     <p>You have been invited by <strong>${req.user.name}</strong> (${req.user.email}) to join the <strong>${siteName}</strong> Admin Panel as <strong>${role}</strong>.</p>
                     <div style="text-align: center; margin: 30px 0;">
-                        <a href="${inviteUrl}" style="background-color: #4F46E5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">Accept Invitation</a>
+                        <a href="${inviteUrl}" style="background-color: #FFA602; color: #111827; padding: 14px 28px; text-decoration: none; border-radius: 999px; display: inline-block; font-weight: 700; font-size: 16px; box-shadow: 0 10px 25px rgba(255, 166, 2, 0.35); letter-spacing: 0.3px;">Accept Invitation</a>
                     </div>
                     <p style="color: #666; font-size: 14px; margin-top: 20px;">
                         <strong>Or copy this link:</strong><br>
-                        <a href="${inviteUrl}" style="color: #4F46E5; word-break: break-all;">${inviteUrl}</a>
+                        <a href="${inviteUrl}" style="color: #FF6B00; word-break: break-all; text-decoration: underline;">${inviteUrl}</a>
                     </p>
                     <p style="color: #666; font-size: 14px; margin-bottom: 0;">
                         <strong>Important:</strong> This invitation will expire on <strong>${expiresAt.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>.

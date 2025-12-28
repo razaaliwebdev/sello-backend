@@ -285,8 +285,8 @@ export const getSupportChatMessages = async (req, res) => {
             });
         }
 
-        // Check if user is participant
-        if (!chat.participants.includes(req.user._id)) {
+        // Check if user is participant (allow admins to access any chat)
+        if (req.user.role !== 'admin' && !chat.participants.includes(req.user._id)) {
             return res.status(403).json({
                 success: false,
                 message: "You don't have access to this chat."

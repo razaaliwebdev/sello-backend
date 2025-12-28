@@ -23,7 +23,7 @@ const seed = async () => {
         const carFields = [
             // Standard Fields
             { name: "title", label: "Ad Title", type: "text", required: true, order: 1 },
-            { name: "price", label: "Price (AED)", type: "number", required: true, order: 2 },
+            { name: "price", label: "Price (PKR)", type: "number", required: true, order: 2 },
             { name: "description", label: "Description", type: "textarea", required: false, order: 3 },
             
             // Car Specifics
