@@ -96,6 +96,11 @@ if (
   allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
+// In production, if no CLIENT_URL is set, allow the production frontend URL
+if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+  allowedOrigins.push("https://sello.pk");
+}
+
 // Validate origins function
 const isValidOrigin = (origin) => {
   if (!origin) return false; // Require origin for security
