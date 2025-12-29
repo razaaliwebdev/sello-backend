@@ -46,15 +46,9 @@ export const VEHICLE_FIELD_CONFIG = {
       "condition",
       "price",
       "fuelType",
-      "engineCapacity",
-      "transmission",
-      "regionalSpec",
-      "bodyType", // Bus body types: School Bus, Coach, Mini Bus, etc.
+      "bodyType",
       "city",
       "contactNumber",
-      "sellerType",
-      "warranty",
-      "ownerType",
     ],
     optional: [
       "description",
@@ -64,8 +58,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "mileage",
       "features",
       "location",
-      "horsepower",
-      "numberOfCylinders",
       "geoLocation",
     ],
   },
@@ -78,15 +70,9 @@ export const VEHICLE_FIELD_CONFIG = {
       "condition",
       "price",
       "fuelType",
-      "engineCapacity",
-      "transmission",
-      "regionalSpec",
-      "bodyType", // Truck body types: Pickup, Flatbed, Box Truck, Dump Truck, etc.
+      "bodyType",
       "city",
       "contactNumber",
-      "sellerType",
-      "warranty",
-      "ownerType",
     ],
     optional: [
       "description",
@@ -96,8 +82,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "mileage",
       "features",
       "location",
-      "horsepower",
-      "numberOfCylinders",
       "geoLocation",
     ],
   },
@@ -110,15 +94,9 @@ export const VEHICLE_FIELD_CONFIG = {
       "condition",
       "price",
       "fuelType",
-      "engineCapacity",
-      "transmission",
-      "regionalSpec",
       "bodyType",
       "city",
       "contactNumber",
-      "sellerType",
-      "warranty",
-      "ownerType",
     ],
     optional: [
       "description",
@@ -128,9 +106,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "mileage",
       "features",
       "location",
-      "carDoors",
-      "horsepower",
-      "numberOfCylinders",
       "geoLocation",
     ],
   },
@@ -142,15 +117,9 @@ export const VEHICLE_FIELD_CONFIG = {
       "year",
       "condition",
       "price",
-      "fuelType",
-      "engineCapacity", // Displacement in cc - important for motorcycles
-      "transmission",
-      "regionalSpec",
+      "bodyType",
       "city",
       "contactNumber",
-      "sellerType",
-      "warranty",
-      "ownerType",
     ],
     optional: [
       "description",
@@ -160,8 +129,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "mileage",
       "features",
       "location",
-      "horsepower",
-      "numberOfCylinders", // Bikes can have 1, 2, 3, 4, or 6 cylinders
       "geoLocation",
     ],
   },
@@ -175,9 +142,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "price",
       "city",
       "contactNumber",
-      "sellerType",
-      "warranty",
-      "ownerType",
     ],
     optional: [
       "description",
@@ -201,14 +165,20 @@ export const VEHICLE_FIELD_CONFIG = {
  * Get required fields for a vehicle type
  */
 export const getRequiredFields = (vehicleType) => {
-  return VEHICLE_FIELD_CONFIG[vehicleType]?.required || VEHICLE_FIELD_CONFIG.Car.required;
+  return (
+    VEHICLE_FIELD_CONFIG[vehicleType]?.required ||
+    VEHICLE_FIELD_CONFIG.Car.required
+  );
 };
 
 /**
  * Get optional fields for a vehicle type
  */
 export const getOptionalFields = (vehicleType) => {
-  return VEHICLE_FIELD_CONFIG[vehicleType]?.optional || VEHICLE_FIELD_CONFIG.Car.optional;
+  return (
+    VEHICLE_FIELD_CONFIG[vehicleType]?.optional ||
+    VEHICLE_FIELD_CONFIG.Car.optional
+  );
 };
 
 /**
@@ -217,14 +187,14 @@ export const getOptionalFields = (vehicleType) => {
 export const validateRequiredFields = (vehicleType, data) => {
   const requiredFields = getRequiredFields(vehicleType);
   const missing = [];
-  
-  requiredFields.forEach(key => {
+
+  requiredFields.forEach((key) => {
     const value = data[key];
-    if (!value || (typeof value === 'string' && value.trim() === '')) {
+    if (!value || (typeof value === "string" && value.trim() === "")) {
       missing.push(key);
     }
   });
-  
+
   return {
     isValid: missing.length === 0,
     missing,
