@@ -103,7 +103,9 @@ if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
 
 // Validate origins function
 const isValidOrigin = (origin) => {
-  if (!origin) return false; // Require origin for security
+  // Allow requests with no origin in development (Postman, curl, etc.)
+  if (!origin && process.env.NODE_ENV === "development") return true;
+  if (!origin) return false; // Require origin for security in production
 
   // Check against allowed origins
   if (allowedOrigins.includes(origin)) return true;
@@ -120,8 +122,11 @@ const isValidOrigin = (origin) => {
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Reject requests with no origin (except for server-to-server)
+      // Allow requests with no origin in development (Postman, curl, etc.)
       if (!origin) {
+        if (process.env.NODE_ENV === "development") {
+          return callback(null, true);
+        }
         return callback(new Error("Origin required for security"));
       }
 
