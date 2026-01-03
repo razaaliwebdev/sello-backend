@@ -20,7 +20,7 @@ export const requestTimeout = (defaultTimeoutMs = 30000) => {
     } else if (req.path.includes("/upload") || req.path.includes("/import")) {
       timeoutMs = 120000; // 2 minutes for file operations
     } else if (req.method === "DELETE" && req.path.includes("/role")) {
-      timeoutMs = 45000; // 45 seconds for role deletion
+      timeoutMs = 75000; // 75 seconds for role deletion (increased from 45s)
     } else if (
       req.path.includes("/analytics") ||
       req.path.includes("/reports")

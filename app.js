@@ -60,6 +60,17 @@ const allowedOrigins = [
   "https://www.sello.pk",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+  // Add mobile development ports
+  "http://localhost:19006",
+  "http://127.0.0.1:19006",
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
 ];
 
 app.use(
@@ -67,6 +78,14 @@ app.use(
     origin: (origin, callback) => {
       // allow server-to-server, OAuth redirects, Postman
       if (!origin) return callback(null, true);
+
+      // Allow all localhost origins in development
+      if (
+        process.env.NODE_ENV !== "production" &&
+        (origin.includes("localhost") || origin.includes("127.0.0.1"))
+      ) {
+        return callback(null, true);
+      }
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -101,7 +120,7 @@ app.use(requestIdMiddleware);
 app.use(performanceMonitor);
 
 import { requestTimeout } from "./middlewares/requestTimeout.js";
-app.use(requestTimeout(30000));
+app.use(requestTimeout(60000)); // Increased from 30s to 60s
 
 import { sanitizeInput } from "./middlewares/sanitizeMiddleware.js";
 import { rateLimit } from "./middlewares/securityMiddleware.js";

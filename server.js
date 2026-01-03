@@ -144,8 +144,8 @@ const startServer = () => {
 
     // Handle connection issues proactively
     server.on("connection", (socket) => {
-      // Set socket timeout
-      socket.setTimeout(30000); // 30 seconds socket timeout
+      // Set socket timeout to match server timeout
+      socket.setTimeout(60000); // Increased from 30s to 60s
 
       socket.on("timeout", () => {
         Logger.warn("Socket timeout detected", {

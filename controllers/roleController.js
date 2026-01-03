@@ -451,9 +451,9 @@ export const deleteRole = async (req, res) => {
     // Check if any users are using this role (with timeout protection)
     let usersWithRole = 0;
     try {
-      // Add timeout to prevent hanging queries
+      // Add timeout to prevent hanging queries (increased to 30s)
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("User count query timeout")), 15000)
+        setTimeout(() => reject(new Error("User count query timeout")), 30000)
       );
 
       usersWithRole = await Promise.race([
