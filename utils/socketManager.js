@@ -1,19 +1,16 @@
 // Socket.io scaling and optimization utilities
 import { Server as SocketIOServer } from "socket.io";
-import { createAdapter } from "@socket.io/redis-adapter";
-import { createClient } from "redis";
 import Logger from "./logger.js";
 
 class SocketManager {
   constructor() {
     this.io = null;
-    this.redisAdapter = null;
     this.connectedClients = new Map();
     this.rooms = new Map();
     this.messageQueue = [];
   }
 
-  // Initialize Socket.io with Redis adapter for scaling
+  // Initialize Socket.io with memory adapter (no Redis)
   async initialize(server, options = {}) {
     const {
       cors = {
@@ -21,7 +18,6 @@ class SocketManager {
         methods: ["GET", "POST"],
         credentials: true,
       },
-      adapter = "redis", // 'redis' or 'memory'
       maxConnections = 10000,
       pingTimeout = 60000,
       pingInterval = 25000,
@@ -34,39 +30,37 @@ class SocketManager {
       pingInterval,
     });
 
-    // Setup Redis adapter for scaling
-    if (adapter === "redis" && process.env.REDIS_URL) {
-      await this.setupRedisAdapter();
-    }
-
-    this.setupEventHandlers();
-    this.setupHealthChecks();
-
-    Logger.info("Socket.io server initialized", {
-      adapter,
+    // Using memory adapter (no Redis)
+    Logger.info("Socket.io server initialized with memory adapter", {
       maxConnections,
       corsOrigins: cors.origin,
     });
 
+    this.setupEventHandlers();
+    this.setupHealthChecks();
+
     return this.io;
   }
 
-  // Setup Redis adapter for multi-instance scaling
-  async setupRedisAdapter() {
-    try {
-      const redisClient = createClient({ url: process.env.REDIS_URL });
-      const pubClient = createClient({ url: process.env.REDIS_URL });
+  // Get connection statistics
+  getStats() {
+    return {
+      connectedClients: this.connectedClients.size,
+      activeRooms: this.rooms.size,
+      totalMessages: this.messageQueue.length,
+      adapterType: "memory",
+    };
+  }
 
-      await Promise.all([redisClient.connect(), pubClient.connect()]);
+  // Graceful shutdown
+  async shutdown() {
+    Logger.info("Shutting down Socket.io server...");
 
-      this.redisAdapter = createAdapter(pubClient, redisClient);
-      this.io.adapter(this.redisAdapter);
+    // Disconnect all clients
+    this.io.emit("server-shutdown", { message: "Server is shutting down" });
 
-      Logger.info("Redis adapter configured for Socket.io");
-    } catch (error) {
-      Logger.error("Failed to setup Redis adapter:", error);
-      // Fallback to memory adapter
-    }
+    this.io.close();
+    Logger.info("Socket.io server shutdown complete");
   }
 
   // Setup event handlers with proper error handling
@@ -366,11 +360,6 @@ class SocketManager {
 
     // Disconnect all clients
     this.io.emit("server-shutdown", { message: "Server is shutting down" });
-
-    // Close Redis connections
-    if (this.redisAdapter) {
-      await this.redisAdapter.close();
-    }
 
     this.io.close();
     Logger.info("Socket.io server shutdown complete");

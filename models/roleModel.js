@@ -43,12 +43,14 @@ const roleSchema = new mongoose.Schema(
       viewDealers: { type: Boolean, default: false },
       approveDealers: { type: Boolean, default: false },
       editDealers: { type: Boolean, default: false },
+      deleteDealers: { type: Boolean, default: false },
       manageDealerSubscriptions: { type: Boolean, default: false },
       viewDealerPerformance: { type: Boolean, default: false },
 
       // Content Management
       manageBlogs: { type: Boolean, default: false },
       publishBlogs: { type: Boolean, default: false },
+      deleteBlogs: { type: Boolean, default: false },
       moderateComments: { type: Boolean, default: false },
       managePromotions: { type: Boolean, default: false },
       createPushNotifications: { type: Boolean, default: false },
@@ -76,7 +78,53 @@ const roleSchema = new mongoose.Schema(
 
       // Categories & Content
       manageCategories: { type: Boolean, default: false },
+      viewCategories: { type: Boolean, default: false },
+      createCategories: { type: Boolean, default: false },
+      editCategories: { type: Boolean, default: false },
+      deleteCategories: { type: Boolean, default: false },
       manageCarTypes: { type: Boolean, default: false },
+
+      // Reports
+      editReports: { type: Boolean, default: false },
+      deleteReports: { type: Boolean, default: false },
+
+      // Chat
+      createChatLogs: { type: Boolean, default: false },
+      editChatLogs: { type: Boolean, default: false },
+      deleteChatLogs: { type: Boolean, default: false },
+
+      // Support
+      createSupportTickets: { type: Boolean, default: false },
+      deleteSupportTickets: { type: Boolean, default: false },
+
+      // Inquiries
+      viewInquiries: { type: Boolean, default: false },
+      createInquiries: { type: Boolean, default: false },
+      editInquiries: { type: Boolean, default: false },
+      deleteInquiries: { type: Boolean, default: false },
+
+      // Blogs
+      viewBlogs: { type: Boolean, default: false },
+      createBlogs: { type: Boolean, default: false },
+      editBlogs: { type: Boolean, default: false },
+
+      // Promotions
+      viewPromotions: { type: Boolean, default: false },
+      createPromotions: { type: Boolean, default: false },
+      editPromotions: { type: Boolean, default: false },
+      deletePromotions: { type: Boolean, default: false },
+
+      // Notifications
+      viewNotifications: { type: Boolean, default: false },
+      createNotifications: { type: Boolean, default: false },
+      editNotifications: { type: Boolean, default: false },
+      deleteNotifications: { type: Boolean, default: false },
+
+      // Settings
+      viewSettings: { type: Boolean, default: false },
+      createSettings: { type: Boolean, default: false },
+      editSettings: { type: Boolean, default: false },
+      deleteSettings: { type: Boolean, default: false },
       manageBanners: { type: Boolean, default: false },
 
       // Audit & Security

@@ -1,22 +1,22 @@
-import express from 'express';
+import express from "express";
 import {
-    getAllChats,
-    getChatMessages,
-    reportChat,
-    deleteChat,
-    getChatStatistics,
-    sendChatMessage,
-    deleteMessage,
-    editMessage,
-    getAllMessages
-} from '../controllers/chatController.js';
-import { auth, authorize } from '../middlewares/authMiddleware.js';
+  getAllChats,
+  getChatMessages,
+  reportChat,
+  deleteChat,
+  getChatStatistics,
+  sendChatMessage,
+  deleteMessage,
+  editMessage,
+  getAllMessages,
+} from "../controllers/chatController.js";
+import { auth, authorize } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
 // All routes require admin access
 router.use(auth);
-router.use(authorize('admin'));
+router.use(authorize("admin"));
 
 router.get("/", getAllChats);
 router.get("/statistics", getChatStatistics);
@@ -29,4 +29,3 @@ router.delete("/messages/:messageId", deleteMessage);
 router.put("/messages/:messageId", editMessage);
 
 export default router;
-

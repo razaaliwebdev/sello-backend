@@ -19,7 +19,6 @@ export const VEHICLE_FIELD_CONFIG = {
       "bodyType",
       "city",
       "contactNumber",
-      "sellerType",
       "warranty",
       "ownerType",
     ],

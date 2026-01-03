@@ -121,6 +121,12 @@ app.use(
 app.use(rateLimit);
 
 /* -------------------------------------------------------------------------- */
+/*                        AUTO TOKEN REFRESH MIDDLEWARE                          */
+/* -------------------------------------------------------------------------- */
+import autoRefreshToken from "./utils/tokenRefreshMiddleware.js";
+app.use(autoRefreshToken);
+
+/* -------------------------------------------------------------------------- */
 /*                           MAINTENANCE MODE                                  */
 /* -------------------------------------------------------------------------- */
 app.use((req, res, next) => {
@@ -149,9 +155,29 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => {
   const healthy = mongoose.connection.readyState === 1;
+  const memUsage = process.memoryUsage();
+  const uptime = process.uptime();
+
   res.status(healthy ? 200 : 503).json({
     success: healthy,
-    database: healthy ? "connected" : "disconnected",
+    status: healthy ? "healthy" : "unhealthy",
+    database: {
+      connected: healthy,
+      state: mongoose.connection.readyState,
+      host: mongoose.connection.host,
+      name: mongoose.connection.name,
+    },
+    server: {
+      uptime: `${Math.floor(uptime / 60)}m ${Math.floor(uptime % 60)}s`,
+      memory: {
+        used: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+        total: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+        external: `${Math.round(memUsage.external / 1024 / 1024)}MB`,
+      },
+      nodeVersion: process.version,
+      platform: process.platform,
+    },
+    timestamp: new Date().toISOString(),
   });
 });
 
