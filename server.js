@@ -137,6 +137,32 @@ const startServer = () => {
     const PORT = process.env.PORT || 4000;
     const server = http.createServer(app);
 
+    // Increase server timeout for long-running operations
+    server.timeout = 60000; // 60 seconds instead of default 30
+    server.keepAliveTimeout = 65000; // 65 seconds
+    server.headersTimeout = 66000; // 66 seconds
+
+    // Handle connection issues proactively
+    server.on("connection", (socket) => {
+      // Set socket timeout
+      socket.setTimeout(30000); // 30 seconds socket timeout
+
+      socket.on("timeout", () => {
+        Logger.warn("Socket timeout detected", {
+          remoteAddress: socket.remoteAddress,
+          remotePort: socket.remotePort,
+        });
+        socket.destroy();
+      });
+
+      socket.on("error", (error) => {
+        Logger.error("Socket error", error, {
+          remoteAddress: socket.remoteAddress,
+          remotePort: socket.remotePort,
+        });
+      });
+    });
+
     // Initialize Socket.io with error handling
     let io;
     try {
@@ -174,6 +200,12 @@ const startServer = () => {
         );
         console.error(`      Example: PORT=3001 npm run dev\n`);
         process.exit(1);
+      } else if (error.code === "ECONNRESET" || error.code === "EPIPE") {
+        Logger.warn("Connection reset by client", {
+          code: error.code,
+          message: error.message,
+        });
+        // Don't exit the server for connection resets
       } else {
         Logger.error("Server error", error);
         console.error("❌ Server error:", error);

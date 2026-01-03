@@ -448,10 +448,19 @@ export const deleteRole = async (req, res) => {
       });
     }
 
-    // Check if any users are using this role
+    // Check if any users are using this role (with timeout protection)
     let usersWithRole = 0;
     try {
-      usersWithRole = await User.countDocuments({ roleId: roleId });
+      // Add timeout to prevent hanging queries
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("User count query timeout")), 15000)
+      );
+
+      usersWithRole = await Promise.race([
+        User.countDocuments({ roleId: roleId }),
+        timeoutPromise,
+      ]);
+
       if (usersWithRole > 0) {
         Logger.error("Delete role - Role assigned to users", {
           roleId,
@@ -463,6 +472,14 @@ export const deleteRole = async (req, res) => {
         });
       }
     } catch (userError) {
+      if (userError.message === "User count query timeout") {
+        Logger.error("Delete role - User count query timeout", { roleId });
+        return res.status(408).json({
+          success: false,
+          message:
+            "Request timeout while checking users assigned to this role. Please try again.",
+        });
+      }
       Logger.error("Error checking users with role", userError);
       // Continue with deletion even if user check fails
     }
@@ -477,17 +494,24 @@ export const deleteRole = async (req, res) => {
       isActive: role.isActive,
     });
 
-    await createAuditLog(
-      req.user,
-      "role_deleted",
-      {
-        roleId: role._id,
-        roleName: role.name,
-        roleDisplayName: role.displayName,
-      },
-      null,
-      req
-    );
+    // Create audit log asynchronously (non-blocking to prevent timeouts)
+    setImmediate(async () => {
+      try {
+        await createAuditLog(
+          req.user,
+          "role_deleted",
+          {
+            roleId: role._id,
+            roleName: role.name,
+            roleDisplayName: role.displayName,
+          },
+          null,
+          req
+        );
+      } catch (auditError) {
+        Logger.error("Delete role - Audit log failed", auditError);
+      }
+    });
 
     Logger.info("Delete role - Success", { roleId, roleName: role.name });
     return res.status(200).json({

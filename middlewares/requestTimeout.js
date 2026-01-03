@@ -1,42 +1,62 @@
 /**
  * Request Timeout Middleware
- * Prevents long-running requests from hanging
+ * Prevents long-running requests from hanging with intelligent timeout handling
  */
 
-import Logger from '../utils/logger.js';
+import Logger from "../utils/logger.js";
 
 /**
- * Request timeout middleware
- * @param {number} timeoutMs - Timeout in milliseconds (default: 30 seconds)
+ * Intelligent request timeout middleware
+ * @param {number} defaultTimeoutMs - Default timeout in milliseconds (default: 30 seconds)
  */
-export const requestTimeout = (timeoutMs = 30000) => {
-    return (req, res, next) => {
-        // Set timeout
-        const timeout = setTimeout(() => {
-            if (!res.headersSent) {
-                Logger.warn('Request timeout', {
-                    method: req.method,
-                    url: req.originalUrl || req.url,
-                    timeout: timeoutMs
-                });
-                res.status(504).json({
-                    success: false,
-                    message: 'Request timeout. Please try again.'
-                });
-            }
-        }, timeoutMs);
+export const requestTimeout = (defaultTimeoutMs = 30000) => {
+  return (req, res, next) => {
+    // Determine timeout based on request type and method
+    let timeoutMs = defaultTimeoutMs;
 
-        // Clear timeout when response is sent
-        res.on('finish', () => {
-            clearTimeout(timeout);
+    // Longer timeouts for admin operations and file uploads
+    if (req.path.startsWith("/api/admin")) {
+      timeoutMs = 60000; // 60 seconds for admin operations
+    } else if (req.path.includes("/upload") || req.path.includes("/import")) {
+      timeoutMs = 120000; // 2 minutes for file operations
+    } else if (req.method === "DELETE" && req.path.includes("/role")) {
+      timeoutMs = 45000; // 45 seconds for role deletion
+    } else if (
+      req.path.includes("/analytics") ||
+      req.path.includes("/reports")
+    ) {
+      timeoutMs = 90000; // 90 seconds for analytics
+    }
+
+    // Set timeout
+    const timeout = setTimeout(() => {
+      if (!res.headersSent) {
+        Logger.warn("Request timeout", {
+          method: req.method,
+          url: req.originalUrl || req.url,
+          timeout: timeoutMs,
+          userAgent: req.headers["user-agent"],
+          ip: req.ip || req.headers["x-forwarded-for"],
         });
-
-        res.on('close', () => {
-            clearTimeout(timeout);
+        res.status(408).json({
+          success: false,
+          message: "Request timeout. The operation took too long to complete.",
+          code: "REQUEST_TIMEOUT",
         });
+      }
+    }, timeoutMs);
 
-        next();
-    };
+    // Clear timeout when response is sent
+    res.on("finish", () => {
+      clearTimeout(timeout);
+    });
+
+    res.on("close", () => {
+      clearTimeout(timeout);
+    });
+
+    next();
+  };
 };
 
 /**
@@ -46,12 +66,11 @@ export const requestTimeout = (timeoutMs = 30000) => {
  * @returns {Promise} Query promise with timeout
  */
 export const withQueryTimeout = async (queryPromise, timeoutMs = 10000) => {
-    const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
-            reject(new Error('Database query timeout'));
-        }, timeoutMs);
-    });
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error("Database query timeout"));
+    }, timeoutMs);
+  });
 
-    return Promise.race([queryPromise, timeoutPromise]);
+  return Promise.race([queryPromise, timeoutPromise]);
 };
-
