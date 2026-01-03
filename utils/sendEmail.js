@@ -32,8 +32,10 @@ const sendEmail = async (to, subject, html, options = {}) => {
     setImmediate(async () => {
       try {
         await sendEmailSync(to, subject, html);
+        Logger.info("Async email sent successfully", { to, subject });
       } catch (error) {
         Logger.error("Async email sending failed", error, { to, subject });
+        // Don't throw error for async emails - just log it
       }
     });
 
