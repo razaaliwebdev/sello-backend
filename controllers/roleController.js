@@ -591,10 +591,41 @@ export const inviteUser = async (req, res) => {
     // Check if user already exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "User with this email already exists.",
-      });
+      // Check if the user already has the requested role
+      const hasRole =
+        existingUser.role === role ||
+        (existingUser.roleId && existingUser.roleId.toString() === roleId);
+
+      if (hasRole) {
+        return res.status(409).json({
+          success: false,
+          message: `User already exists with the "${role}" role.`,
+          code: "USER_EXISTS_WITH_ROLE",
+          data: {
+            userId: existingUser._id,
+            email: existingUser.email,
+            fullName: existingUser.fullName,
+            currentRole: existingUser.role,
+            status: existingUser.status,
+          },
+        });
+      } else {
+        return res.status(409).json({
+          success: false,
+          message: `User already exists. Please update their role from user management instead of inviting.`,
+          code: "USER_EXISTS_DIFFERENT_ROLE",
+          data: {
+            userId: existingUser._id,
+            email: existingUser.email,
+            fullName: existingUser.fullName,
+            currentRole: existingUser.role,
+            requestedRole: role,
+            status: existingUser.status,
+            suggestion:
+              "You can update this user's role from the user management page.",
+          },
+        });
+      }
     }
 
     // Check if pending invite exists
@@ -603,9 +634,34 @@ export const inviteUser = async (req, res) => {
       status: "pending",
     });
     if (existingInvite && !existingInvite.isExpired()) {
-      return res.status(400).json({
+      const timeRemaining = existingInvite.expiresAt - new Date();
+      const hoursRemaining = Math.floor(timeRemaining / (1000 * 60 * 60));
+      const daysRemaining = Math.floor(hoursRemaining / 24);
+
+      let timeText = "";
+      if (daysRemaining > 0) {
+        timeText = `${daysRemaining} day${daysRemaining > 1 ? "s" : ""}`;
+      } else if (hoursRemaining > 0) {
+        timeText = `${hoursRemaining} hour${hoursRemaining > 1 ? "s" : ""}`;
+      } else {
+        timeText = "less than an hour";
+      }
+
+      return res.status(409).json({
         success: false,
-        message: "An active invite already exists for this email.",
+        message: `An active invite already exists for this email.`,
+        code: "INVITE_ALREADY_EXISTS",
+        data: {
+          inviteId: existingInvite._id,
+          email: existingInvite.email,
+          role: existingInvite.role,
+          expiresAt: existingInvite.expiresAt,
+          timeRemaining: timeText,
+          actions: [
+            "Resend the existing invite",
+            "Cancel the existing invite and create a new one",
+          ],
+        },
       });
     }
 
@@ -877,11 +933,23 @@ export const inviteUser = async (req, res) => {
       success: true,
       message:
         emailSent && actualEmailSent
-          ? "Invitation sent successfully via email."
-          : "Invitation created successfully, but email was not sent.",
-      data: invite,
-      inviteUrl: inviteUrl, // Always include invite URL
+          ? `Invitation sent successfully to ${email} as ${role}.`
+          : `Invitation created for ${email}. Email was not sent - please share the invite URL manually.`,
+      data: {
+        invite: invite,
+        inviteUrl: inviteUrl,
+        email: email,
+        fullName: fullName,
+        role: role,
+        expiresAt: expiresAt,
+        invitedBy: req.user.name || req.user.email,
+      },
       emailSent: emailSent && actualEmailSent,
+      meta: {
+        expiresIn: `${expirationDays || 7} days`,
+        canResend: true,
+        canCancel: true,
+      },
     };
 
     // Add warning if email was not sent
@@ -1198,6 +1266,107 @@ export const resendInvite = async (req, res) => {
     });
   }
 };
+
+/**
+ * Cancel invite
+ */
+export const cancelInvite = async (req, res) => {
+  try {
+    // Enhanced admin check - only admin can cancel invites
+    if (!req.user || req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admin can cancel invites.",
+      });
+    }
+
+    const { inviteId } = req.params;
+
+    if (!inviteId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invite ID is required.",
+      });
+    }
+
+    // Find and update invite status
+    const invite = await Invite.findByIdAndUpdate(
+      inviteId,
+      {
+        status: "cancelled",
+        cancelledAt: new Date(),
+        cancelledBy: req.user._id,
+      },
+      { new: true }
+    );
+
+    if (!invite) {
+      return res.status(404).json({
+        success: false,
+        message: "Invite not found.",
+      });
+    }
+
+    // Log the cancellation (non-blocking)
+    try {
+      await createAuditLog(
+        req.user,
+        "invite_cancelled",
+        {
+          inviteId: invite._id,
+          targetEmail: invite.email,
+          role: invite.role,
+        },
+        null,
+        req
+      );
+    } catch (auditError) {
+      Logger.error("Audit log error (non-blocking)", auditError);
+    }
+
+    // Create in-app notification
+    try {
+      const notification = await Notification.create({
+        title: "Invite Cancelled",
+        message: `Invitation for ${invite.email} has been cancelled.`,
+        type: "info",
+        recipient: req.user._id,
+        actionUrl: `/admin/settings?tab=users`,
+        actionText: "View Users",
+      });
+
+      // Emit socket event
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`user:${req.user._id}`).emit("new-notification", notification);
+      }
+    } catch (notifError) {
+      Logger.error("Notification creation error", notifError);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Invitation for ${invite.email} has been cancelled successfully.`,
+      data: {
+        inviteId: invite._id,
+        email: invite.email,
+        role: invite.role,
+        cancelledAt: invite.cancelledAt,
+      },
+    });
+  } catch (error) {
+    Logger.error("Cancel Invite Error", error, {
+      inviteId: req.params.inviteId,
+      userId: req.user?._id,
+    });
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
 export const getAllInvites = async (req, res) => {
   try {
     if (req.user.role !== "admin") {

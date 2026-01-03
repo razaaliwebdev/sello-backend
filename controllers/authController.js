@@ -796,7 +796,10 @@ export const forgotPassword = async (req, res) => {
         `;
 
     try {
-      const emailResult = await sendEmail(user.email, subject, html);
+      // Send email asynchronously to prevent slow API responses
+      const emailResult = await sendEmail(user.email, subject, html, {
+        async: true,
+      });
 
       // Check if email was actually sent
       const isDevelopment =

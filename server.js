@@ -134,7 +134,7 @@ if (process.env.ENABLE_CRON_JOBS === "true") {
 // Start server regardless of DB connection status
 const startServer = () => {
   try {
-    const PORT = process.env.PORT || 4000;
+    const PORT = process.env.PORT || 4000; // Fixed port 4000
     const server = http.createServer(app);
 
     // Increase server timeout for long-running operations
@@ -145,7 +145,7 @@ const startServer = () => {
     // Handle connection issues proactively
     server.on("connection", (socket) => {
       // Set socket timeout to match server timeout
-      socket.setTimeout(60000); // Increased from 30s to 60s
+      socket.setTimeout(90000); // Increased from 60s to 90s
 
       socket.on("timeout", () => {
         Logger.warn("Socket timeout detected", {

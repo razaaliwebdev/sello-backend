@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import Logger from "./logger.js";
 
-const sendEmail = async (to, subject, html) => {
+const sendEmail = async (to, subject, html, options = {}) => {
   // Check if email notifications are enabled
   const emailNotificationsEnabled =
     process.env.ENABLE_EMAIL_NOTIFICATIONS !== "false";
@@ -14,6 +14,44 @@ const sendEmail = async (to, subject, html) => {
     return { messageId: "disabled", accepted: [to], actuallySent: false };
   }
 
+  // Additional check for SMTP issues in development
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.DISABLE_EMAIL_IN_DEV === "true"
+  ) {
+    Logger.warn("Email disabled in development via DISABLE_EMAIL_IN_DEV", {
+      to,
+      subject,
+    });
+    return { messageId: "dev-disabled", accepted: [to], actuallySent: false };
+  }
+
+  // If async option is enabled, send email in background
+  if (options.async) {
+    // Send email asynchronously without waiting
+    setImmediate(async () => {
+      try {
+        await sendEmailSync(to, subject, html);
+      } catch (error) {
+        Logger.error("Async email sending failed", error, { to, subject });
+      }
+    });
+
+    // Return immediately with a placeholder
+    return {
+      messageId: `async-${Date.now()}`,
+      accepted: [to],
+      actuallySent: true,
+      async: true,
+    };
+  }
+
+  // Send email synchronously (default behavior)
+  return await sendEmailSync(to, subject, html);
+};
+
+// Separate function for synchronous email sending
+const sendEmailSync = async (to, subject, html) => {
   // Validate email configuration
   const missingVars = [];
   if (!process.env.SMTP_HOST) missingVars.push("SMTP_HOST");
@@ -98,9 +136,9 @@ const sendEmail = async (to, subject, html) => {
         user: username,
         pass: process.env.SMTP_PASSWORD,
       },
-      connectionTimeout: 8000, // 8 seconds - faster failure
-      greetingTimeout: 8000,
-      socketTimeout: 8000,
+      connectionTimeout: 15000, // Increased from 8s to 15s
+      greetingTimeout: 15000, // Increased from 8s to 15s
+      socketTimeout: 15000, // Increased from 8s to 15s
     };
 
     if (isSSL) {
@@ -253,6 +291,23 @@ const sendEmail = async (to, subject, html) => {
       error: lastError.message,
       code: lastError.code,
     });
+
+    // In development, allow continuing without email
+    if (process.env.NODE_ENV !== "production") {
+      Logger.warn(
+        "⚠️ Email disabled in development due to SMTP connection issues",
+        {
+          host: process.env.SMTP_HOST,
+          port: process.env.SMTP_PORT,
+        }
+      );
+      return {
+        messageId: "dev-smtp-failed",
+        accepted: [to],
+        actuallySent: false,
+      };
+    }
+
     throw new Error(
       `SMTP Connection Failed: ${details}. Cannot reach ${process.env.SMTP_HOST}:${process.env.SMTP_PORT}. Check your SMTP_HOST, SMTP_PORT, firewall settings, or contact your hosting provider.`
     );

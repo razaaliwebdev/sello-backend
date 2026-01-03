@@ -26,12 +26,12 @@ function getStore() {
 /**
  * General API rate limiter
  * 100 requests per 15 minutes per IP (production)
- * 500 requests per 15 minutes per IP (development)
+ * DISABLED in development to prevent connection issues
  * Uses Database store when available
  */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === "production" ? 100 : 500, // Different limits for dev/prod
+  max: process.env.NODE_ENV === "production" ? 100 : 10000, // Very high limit in dev
   message: {
     success: false,
     message: "Too many requests from this IP, please try again later.",
@@ -39,9 +39,9 @@ export const apiLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   store: getStore(), // Use Database store
-  // Skip rate limiting for admin users in development
+  // Skip rate limiting entirely in development
   skip: (req) => {
-    return process.env.NODE_ENV === "development" && req.user?.role === "admin";
+    return process.env.NODE_ENV !== "production";
   },
   // Custom key generator to include user ID if authenticated
   keyGenerator: (req) => {
@@ -84,11 +84,12 @@ export const authLimiter = rateLimit({
 /**
  * Rate limiter for password reset endpoints
  * 3 requests per hour per IP
+ * DISABLED in development to prevent connection issues
  * Uses Redis store when available
  */
 export const passwordResetLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // Limit each IP to 3 password reset requests per hour
+  max: process.env.NODE_ENV === "production" ? 3 : 1000, // Very high limit in dev
   message: {
     success: false,
     message: "Too many password reset attempts, please try again after 1 hour.",
@@ -96,6 +97,10 @@ export const passwordResetLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: getStore(), // Use Database store
+  // Skip rate limiting entirely in development
+  skip: (req) => {
+    return process.env.NODE_ENV !== "production";
+  },
   keyGenerator: (req) => {
     // Use email if provided, otherwise IP with IPv6 support
     if (req.body?.email || req.headers?.email) {

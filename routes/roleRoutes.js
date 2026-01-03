@@ -10,6 +10,7 @@ import {
   updateInvite,
   deleteInvite,
   resendInvite,
+  cancelInvite,
   getPermissionMatrix,
   initializeRoles,
   getInviteByToken,
@@ -49,5 +50,6 @@ router.get("/invites/all", getAllInvites);
 router.put("/invites/:inviteId", updateInvite); // Update invite
 router.delete("/invites/:inviteId", deleteInvite); // Delete invite
 router.post("/invites/:inviteId/resend", resendInvite); // Resend invite
+router.post("/invites/:inviteId/cancel", cancelInvite); // Cancel invite
 
 export default router;
