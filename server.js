@@ -203,12 +203,8 @@ const startServer = () => {
     server.listen(PORT, () => {
       Logger.info(`Server is running on PORT:${PORT}`);
       Logger.info(`API available at http://localhost:${PORT}/api`);
-      // Startup messages - intentional console.log for visibility
-      console.log(`🚀 Server is running on PORT:${PORT}`);
-      console.log(`📡 API available at http://localhost:${PORT}/api`);
       if (io) {
         Logger.info("Socket.io initialized");
-        console.log(`🔌 Socket.io initialized`);
       }
     });
 

@@ -95,7 +95,7 @@ export const initializeSocket = (server) => {
     // Join role-based room for notifications
     if (socket.user.role) {
       socket.join(`role:${socket.user.role}`);
-      console.log(
+      Logger.info(
         `User ${socket.userId} joined role room: role:${socket.user.role}`
       );
     }
@@ -103,13 +103,13 @@ export const initializeSocket = (server) => {
     // If admin, join admin room
     if (socket.user.role === "admin") {
       socket.join("admin:room");
-      console.log(`Admin connected: ${socket.userId}`);
+      Logger.info(`Admin connected: ${socket.userId}`);
     }
 
     // Join notifications room
     socket.on("join-notifications", () => {
       socket.join(`user:${socket.userId}`);
-      console.log(`User ${socket.userId} joined notifications room`);
+      Logger.info(`User ${socket.userId} joined notifications room`);
     });
 
     // Join all user's chat rooms (both support and car chats)
@@ -157,7 +157,7 @@ export const initializeSocket = (server) => {
         if (isParticipant) {
           socket.join(`chat:${chatId}`);
           socket.emit("joined-chat", chatId);
-          console.log(`User ${socket.userId} joined chat ${chatId}`);
+          Logger.info(`User ${socket.userId} joined chat ${chatId}`);
         } else {
           Logger.warn("User not a participant in chat", {
             chatId,
@@ -205,7 +205,7 @@ export const initializeSocket = (server) => {
         if (chat.chatType === "support") {
           socket.join(`chat:${chatId}`);
           socket.emit("joined-support-chat", chatId);
-          console.log(`Admin ${socket.userId} joined support chat ${chatId}`);
+          Logger.info(`Admin ${socket.userId} joined support chat ${chatId}`);
         } else {
           Logger.warn("Chat is not a support chat", {
             chatId,
@@ -688,7 +688,7 @@ export const initializeSocket = (server) => {
         });
 
         socket.emit("live-location-enabled", { carId });
-        console.log(
+        Logger.info(
           `Live location enabled for car ${carId} by user ${socket.userId}`
         );
       } catch (error) {
@@ -740,7 +740,7 @@ export const initializeSocket = (server) => {
             carId,
           });
           socket.emit("live-location-disabled", { carId });
-          console.log(
+          Logger.info(
             `Live location disabled for car ${carId} by user ${socket.userId}`
           );
         }
@@ -782,7 +782,7 @@ export const initializeSocket = (server) => {
 
     // Handle disconnect
     socket.on("disconnect", () => {
-      console.log(`User disconnected: ${socket.userId}`);
+      Logger.info(`User disconnected: ${socket.userId}`);
       activeUsers.delete(socket.userId);
 
       // Remove from typing indicators

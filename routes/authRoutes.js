@@ -4,6 +4,7 @@ import {
   login,
   forgotPassword,
   verifyOtp,
+  resendOtp,
   resetPassword,
   googleLogin,
   logout,
@@ -36,6 +37,7 @@ router.post("/login", authLimiter, login);
 router.post("/refresh-token", authLimiter, refreshToken); // Refresh token endpoint
 router.post("/forgot-password", passwordResetLimiter, forgotPassword);
 router.post("/verify-otp", passwordResetLimiter, verifyOtp);
+router.post("/resend-otp", passwordResetLimiter, resendOtp);
 router.post("/reset-password", passwordResetLimiter, resetPassword);
 router.post("/google", authLimiter, googleLogin);
 router.post("/logout", logout); // Can be used with or without auth

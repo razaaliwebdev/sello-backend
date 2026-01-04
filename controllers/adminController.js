@@ -1,10 +1,12 @@
-import User from "../models/userModel.js";
-import Car from "../models/carModel.js";
-import CustomerRequest from "../models/customerRequestModel.js";
-import ListingHistory from "../models/listingHistoryModel.js";
-import { getAuditLogs } from "../utils/auditLogger.js";
 import mongoose from "mongoose";
+import Car from "../models/carModel.js";
+import User from "../models/userModel.js";
 import Logger from "../utils/logger.js";
+import sendEmail from "../utils/sendEmail.js";
+import {
+  getCarApprovedTemplate,
+  getCarRejectedTemplate,
+} from "../utils/emailTemplates.js";
 
 /**
  * Admin Dashboard Stats
@@ -920,6 +922,40 @@ export const approveCar = async (req, res) => {
     }
 
     await car.save();
+
+    // Send email notification to seller
+    try {
+      const seller = await User.findById(car.postedBy);
+      if (seller && seller.email) {
+        let subject, html;
+
+        if (car.isApproved) {
+          subject = "🎉 Your Car Listing is Live! - SELLO";
+          html = getCarApprovedTemplate(seller.name, car.title, car._id);
+        } else {
+          subject = "Listing Update - SELLO";
+          html = getCarRejectedTemplate(
+            seller.name,
+            car.title,
+            car.rejectionReason
+          );
+        }
+
+        await sendEmail(seller.email, subject, html, { async: true });
+        Logger.info(
+          `Car ${car.isApproved ? "approval" : "rejection"} email sent to: ${
+            seller.email
+          }`
+        );
+      }
+    } catch (emailError) {
+      Logger.warn(
+        `Failed to send car ${
+          car.isApproved ? "approval" : "rejection"
+        } email: ${emailError.message}`
+      );
+      // Don't break the approval process if email fails
+    }
 
     return res.status(200).json({
       success: true,

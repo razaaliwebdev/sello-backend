@@ -238,6 +238,30 @@ export const upsertSetting = async (req, res) => {
       });
     }
 
+    // CRITICAL: Prevent non-admin users from modifying subscription settings
+    const protectedSettings = [
+      "paymentSystemEnabled",
+      "showSubscriptionPlans",
+      "showSubscriptionTab",
+      "showPaymentHistory",
+      "enableAutoRenewal",
+      "requirePaymentApproval",
+    ];
+
+    if (protectedSettings.includes(key) && req.user.role !== "admin") {
+      Logger.warn("Unauthorized attempt to modify protected setting", {
+        userId: req.user._id,
+        userRole: req.user.role,
+        key: key,
+        attemptedValue: value,
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: "Protected settings can only be modified by administrators.",
+      });
+    }
+
     // Validation rules for specific settings
     const validationRules = {
       siteName: {
@@ -382,6 +406,10 @@ export const upsertSetting = async (req, res) => {
       }
     }
 
+    // Get previous value for audit logging
+    const previousSetting = await Settings.findOne({ key });
+    const previousValue = previousSetting ? previousSetting.value : null;
+
     const setting = await Settings.findOneAndUpdate(
       { key },
       {
@@ -397,17 +425,41 @@ export const upsertSetting = async (req, res) => {
       }
     );
 
-    await createAuditLog(
-      req.user,
-      "setting_updated",
-      {
-        key,
-        value,
-        category,
-      },
-      null,
-      req
-    );
+    // Enhanced audit logging for protected settings
+    if (protectedSettings.includes(key)) {
+      await createAuditLog(
+        req.user,
+        "protected_setting_updated",
+        {
+          key,
+          previousValue,
+          newValue: processedValue,
+          category,
+        },
+        null,
+        req
+      );
+
+      Logger.info("Protected setting updated by admin", {
+        userId: req.user._id,
+        userRole: req.user.role,
+        key: key,
+        previousValue,
+        newValue: processedValue,
+      });
+    } else {
+      await createAuditLog(
+        req.user,
+        "setting_updated",
+        {
+          key,
+          value: processedValue,
+          category,
+        },
+        null,
+        req
+      );
+    }
 
     return res.status(200).json({
       success: true,

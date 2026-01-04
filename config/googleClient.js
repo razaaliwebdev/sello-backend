@@ -1,14 +1,22 @@
-import { OAuth2Client } from 'google-auth-library';
-import Logger from '../utils/logger.js';
+import { OAuth2Client } from "google-auth-library";
+import Logger from "../utils/logger.js";
 
-// Use environment variable or fallback to the same client ID as frontend
-const googleClientId = process.env.GOOGLE_CLIENT_ID || "90770038046-jpumef82nch1o3amujieujs2m1hr73rt.apps.googleusercontent.com";
+// Google Client ID is required for Google OAuth to work
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
 
-// Warn if using fallback (development only)
-if (!process.env.GOOGLE_CLIENT_ID && process.env.NODE_ENV !== 'production') {
-    Logger.warn('GOOGLE_CLIENT_ID not set, using fallback client ID', {
-        message: 'For production, set GOOGLE_CLIENT_ID in your .env file'
+if (!googleClientId) {
+  if (process.env.NODE_ENV === "production") {
+    Logger.error("GOOGLE_CLIENT_ID is required in production", {
+      error: "Missing required environment variable for Google OAuth",
     });
+    throw new Error(
+      "GOOGLE_CLIENT_ID environment variable is required in production"
+    );
+  } else {
+    Logger.warn("GOOGLE_CLIENT_ID not set, Google OAuth will not work", {
+      message: "Set GOOGLE_CLIENT_ID in your .env file to enable Google OAuth",
+    });
+  }
 }
 
 const client = new OAuth2Client(googleClientId);

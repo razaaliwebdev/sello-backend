@@ -7,6 +7,11 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { generateOtp } from "../utils/generateOtp.js";
 import sendEmail from "../utils/sendEmail.js";
+import {
+  getPasswordResetTemplate,
+  getWelcomeTemplate,
+  getEmailVerificationTemplate,
+} from "../utils/emailTemplates.js";
 import client from "../config/googleClient.js";
 import { uploadCloudinary } from "../utils/cloudinary.js";
 import Logger from "../utils/logger.js";
@@ -458,6 +463,19 @@ export const register = async (req, res) => {
     // Create user
     const user = await User.create(userData);
 
+    // Send welcome email
+    try {
+      const welcomeSubject = "Welcome to SELLO! 🎉";
+      const welcomeHtml = getWelcomeTemplate(user.name);
+      await sendEmail(user.email, welcomeSubject, welcomeHtml, { async: true });
+      Logger.info(`Welcome email sent to: ${user.email}`);
+    } catch (emailError) {
+      Logger.warn(
+        `Failed to send welcome email to ${user.email}: ${emailError.message}`
+      );
+      // Don't break registration if email fails
+    }
+
     // If dealer registration and not auto-approved, create admin notification
     if (role === "dealer" && !autoApproveDealers) {
       try {
@@ -743,9 +761,22 @@ export const forgotPassword = async (req, res) => {
           !user ? "non-existent" : "suspended"
         } email: ${normalizedEmail}`
       );
-      return res
-        .status(200)
-        .json({ success: true, message: genericSuccessMessage });
+
+      // USER-FRIENDLY APPROACH: Be honest with users
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "No account found with this email. Please check and try again.",
+        });
+      }
+
+      if (user.status === "suspended") {
+        return res.status(403).json({
+          success: false,
+          message: "Account suspended. Please contact support.",
+        });
+      }
     }
 
     /* 3. Generate & Save OTP */
@@ -760,18 +791,7 @@ export const forgotPassword = async (req, res) => {
 
     /* 4. Send Email */
     const subject = "SELLO – Password Reset Code";
-    const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
-        <h2 style="color: #333;">Password Reset</h2>
-        <p>Hello ${user.name || "User"},</p>
-        <p>Your password reset code is:</p>
-        <h1 style="background: #f4f4f4; padding: 10px; text-align: center; letter-spacing: 5px;">${otp}</h1>
-        <p>This code expires in <strong>10 minutes</strong>.</p>
-        <p>If you did not request this, please ignore this email.</p>
-        <hr style="border: none; border-top: 1px solid #eee;" />
-        <small style="color: #888;">© ${new Date().getFullYear()} SELLO</small>
-      </div>
-    `;
+    const html = getPasswordResetTemplate(user.name, otp, 10);
 
     try {
       await sendEmail(user.email, subject, html);
@@ -785,7 +805,8 @@ export const forgotPassword = async (req, res) => {
     /* 5. Final Response */
     return res.status(200).json({
       success: true,
-      message: genericSuccessMessage,
+      message: "Password reset code sent to your email address.",
+      email: user.email, // Show which email it was sent to
     });
   } catch (error) {
     Logger.error("Forgot Password Controller Error", {
@@ -805,8 +826,7 @@ export const forgotPassword = async (req, res) => {
  */
 export const verifyOtp = async (req, res) => {
   try {
-    const { otp } = req.body;
-    const email = req.headers.email;
+    const { otp, email } = req.body;
 
     if (!otp) {
       return res.status(400).json({
@@ -818,28 +838,57 @@ export const verifyOtp = async (req, res) => {
     if (!email) {
       return res.status(400).json({
         success: false,
-        message: "Email is required in headers.",
+        message: "Email is required.",
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return res.status(404).json({
+    // Validate email format
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
         success: false,
-        message: "User not found.",
+        message: "Please provide a valid email address.",
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+    // 🔐 SECURITY: Don't reveal if user exists or not
+    if (!user) {
+      Logger.warn(
+        `OTP verification attempt for non-existent email: ${email.toLowerCase()}`
+      );
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP. Please try again.",
+      });
+    }
+
+    // Check user status
+    if (user.status === "suspended") {
+      return res.status(403).json({
+        success: false,
+        message: "Account suspended. Please contact support.",
       });
     }
 
     // Check if OTP exists and is valid
     if (!user.otp || user.otp !== otp.toString()) {
+      Logger.warn(
+        `Invalid OTP attempt for email: ${user.email}. Expected: ${user.otp}, Got: ${otp}`
+      );
       return res.status(400).json({
         success: false,
-        message: "Invalid OTP.",
+        message: "Invalid or expired OTP. Please try again.",
       });
     }
 
     // Check if OTP is expired
     if (Date.now() > user.otpExpiry) {
+      Logger.warn(
+        `Expired OTP attempt for email: ${
+          user.email
+        }. OTP expired at: ${new Date(user.otpExpiry)}`
+      );
       user.otp = null;
       user.otpExpiry = null;
       await user.save({ validateBeforeSave: false });
@@ -850,13 +899,20 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // OTP is valid - don't clear it yet, let reset-password handle it
+    // OTP is valid - mark as verified but don't clear it yet
+    user.otpVerified = true;
+    await user.save({ validateBeforeSave: false });
+
+    Logger.info(
+      `OTP verified successfully for: ${user.email}. otpVerified set to: ${user.otpVerified}`
+    );
+
     return res.status(200).json({
       success: true,
       message: "OTP verified successfully. You can now reset your password.",
     });
   } catch (error) {
-    Logger.error("Verify OTP Error", error, { email: req.headers?.email });
+    Logger.error("Verify OTP Error", error, { email: req.body?.email });
     return res.status(500).json({
       success: false,
       message: "Server error. Please try again later.",
@@ -866,21 +922,126 @@ export const verifyOtp = async (req, res) => {
 };
 
 /**
+ * Resend OTP Controller
+ */
+export const resendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const genericSuccessMessage =
+      "If an account exists with this email, you will receive a new password reset code.";
+
+    /* 1. Basic Validation */
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required." });
+    }
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
+    }
+
+    /* 2. Rate Limiting Check */
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    // 🔐 SECURITY: Return the SAME response for non-existent OR suspended users.
+    if (!user || user.status === "suspended") {
+      Logger.warn(
+        `Resend OTP attempt for ${
+          !user ? "non-existent" : "suspended"
+        } email: ${normalizedEmail}`
+      );
+
+      // USER-FRIENDLY APPROACH: Be honest with users
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "No account found with this email. Please check and try again.",
+        });
+      }
+
+      if (user.status === "suspended") {
+        return res.status(403).json({
+          success: false,
+          message: "Account suspended. Please contact support.",
+        });
+      }
+    }
+
+    // Check if there's a recent OTP request (prevent spam)
+    const otpCooldown = 2 * 60 * 1000; // 2 minutes
+    const timeSinceLastRequest = Date.now() - (user.otpExpiry - 10 * 60 * 1000);
+    if (timeSinceLastRequest < otpCooldown) {
+      const remainingTime = Math.ceil(
+        (otpCooldown - timeSinceLastRequest) / 1000
+      );
+      return res.status(429).json({
+        success: false,
+        message: `Please wait ${remainingTime} seconds before requesting a new OTP.`,
+      });
+    }
+
+    /* 3. Generate & Save New OTP */
+    const otp = generateOtp();
+    user.otp = otp.toString();
+    user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 Minutes from now
+    user.otpVerified = false; // Reset verification status
+
+    await user.save({ validateBeforeSave: false });
+
+    Logger.info(`New OTP generated for: ${user.email}`);
+
+    /* 4. Send Email */
+    const subject = "SELLO – New Password Reset Code";
+    const html = getPasswordResetTemplate(user.name, otp, 10);
+
+    try {
+      await sendEmail(user.email, subject, html);
+    } catch (emailError) {
+      Logger.error(
+        `Failed to send reset email to ${user.email}: ${emailError.message}`
+      );
+    }
+
+    /* 5. Final Response */
+    return res.status(200).json({
+      success: true,
+      message: "New password reset code sent to your email address.",
+      email: user.email, // Show which email it was sent to
+    });
+  } catch (error) {
+    Logger.error("Resend OTP Controller Error", {
+      message: error.message,
+      stack: error.stack,
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
+  }
+};
+
+/**
  * Reset Password Controller
  */
 export const resetPassword = async (req, res) => {
   try {
-    const { newPassword } = req.body;
-    const email = req.headers.email;
+    const { password, email } = req.body;
 
-    if (!newPassword) {
+    if (!password) {
       return res.status(400).json({
         success: false,
         message: "New password is required.",
       });
     }
 
-    if (!isValidPassword(newPassword)) {
+    if (!isValidPassword(password)) {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 6 characters long.",
@@ -890,41 +1051,95 @@ export const resetPassword = async (req, res) => {
     if (!email) {
       return res.status(400).json({
         success: false,
-        message: "Email is required in headers.",
+        message: "Email is required.",
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found.",
-      });
-    }
-
-    // Verify OTP was verified (OTP should still exist)
-    if (!user.otp) {
+    // Validate email format
+    if (!isValidEmail(email)) {
       return res.status(400).json({
         success: false,
-        message: "Please verify OTP first.",
+        message: "Please provide a valid email address.",
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+    // 🔐 SECURITY: Don't reveal if user exists or not
+    if (!user) {
+      Logger.warn(
+        `Password reset attempt for non-existent email: ${email.toLowerCase()}`
+      );
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid or expired session. Please start the password reset process again.",
+      });
+    }
+
+    // Check user status
+    if (user.status === "suspended") {
+      return res.status(403).json({
+        success: false,
+        message: "Account suspended. Please contact support.",
+      });
+    }
+
+    // Verify OTP was verified (check both OTP exists and was verified)
+    if (!user.otp) {
+      Logger.warn(
+        `Password reset attempt without OTP for email: ${user.email}`
+      );
+      return res.status(400).json({
+        success: false,
+        message: "No OTP found. Please verify your OTP first.",
+      });
+    }
+
+    if (!user.otpVerified) {
+      Logger.warn(
+        `Password reset attempt with unverified OTP for email: ${user.email}`
+      );
+      return res.status(400).json({
+        success: false,
+        message: "OTP not verified. Please complete OTP verification first.",
+      });
+    }
+
+    // Check if OTP is expired
+    if (Date.now() > user.otpExpiry) {
+      user.otp = null;
+      user.otpExpiry = null;
+      user.otpVerified = false;
+      await user.save({ validateBeforeSave: false });
+
+      return res.status(400).json({
+        success: false,
+        message: "Session expired. Please request a new OTP and try again.",
       });
     }
 
     // Hash new password
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Update password and clear OTP
+    // Clear all refresh tokens for this user (session invalidation)
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    // Update password and clear OTP fields
     user.password = hashedPassword;
     user.otp = null;
     user.otpExpiry = null;
+    user.otpVerified = false;
     await user.save();
+
+    Logger.info(`Password reset successfully for: ${user.email}`);
 
     return res.status(200).json({
       success: true,
       message: "Password updated successfully.",
     });
   } catch (error) {
-    Logger.error("Reset Password Error", error, { email: req.headers?.email });
+    Logger.error("Reset Password Error", error, { email: req.body?.email });
     return res.status(500).json({
       success: false,
       message: "Server error. Please try again later.",

@@ -9,6 +9,9 @@
     "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
     "dev": "nodemon server.js",
     "start": "node server.js",
+    "start:prod": "NODE_ENV=production node ./scripts/startProduction.js",
+    "check:prod": "NODE_ENV=production node ./scripts/checkProduction.js",
+    "reset:subscription-settings": "node ./scripts/resetSubscriptionSettings.js",
     "cron:auto-delete-sold": "node ./scripts/autoDeleteSoldCars.js",
     "validate-env": "node ./scripts/validateEnv.js"
   },

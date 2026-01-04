@@ -146,4 +146,48 @@ router.post(
   createAdminChatWithUser
 );
 
+// Settings Management - require manageSettings permission
+router.post(
+  "/reset-subscription-settings",
+  hasPermission("manageUsers"),
+  async (req, res) => {
+    try {
+      const { exec } = await import("child_process");
+      const path = await import("path");
+
+      const scriptPath = path.join(
+        process.cwd(),
+        "scripts",
+        "resetSubscriptionSettings.js"
+      );
+
+      exec(`node "${scriptPath}"`, (error, stdout, stderr) => {
+        if (error) {
+          Logger.error("Reset subscription settings script error", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to reset subscription settings",
+          });
+        }
+
+        Logger.info("Subscription settings reset successfully", {
+          userId: req.user._id,
+        });
+
+        res.status(200).json({
+          success: true,
+          message: "Subscription settings reset to defaults successfully",
+          output: stdout,
+        });
+      });
+    } catch (error) {
+      Logger.error("Reset subscription settings error", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error resetting settings",
+      });
+    }
+  }
+);
+
 export default router;
