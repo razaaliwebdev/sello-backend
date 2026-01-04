@@ -31,6 +31,33 @@ if (process.env.SENTRY_DSN) {
 // Validate environment variables before starting server
 validateEnvVars({ strict: process.env.NODE_ENV === "production" });
 
+// Global error handlers to prevent server crashes
+process.on("uncaughtException", (error) => {
+  Logger.error("Uncaught Exception (server will continue running)", error);
+  console.error("❌ Uncaught Exception:", error.message);
+  // Don't exit the server, just log the error
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  Logger.error("Unhandled Rejection (server will continue running)", {
+    reason,
+    promise,
+  });
+  console.error("❌ Unhandled Rejection:", reason);
+  // Don't exit the server, just log the error
+});
+
+// Handle SIGTERM and SIGINT gracefully
+process.on("SIGTERM", () => {
+  Logger.info("SIGTERM received, shutting down gracefully");
+  process.exit(0);
+});
+
+process.on("SIGINT", () => {
+  Logger.info("SIGINT received, shutting down gracefully");
+  process.exit(0);
+});
+
 // Optional: Setup cron jobs for background tasks
 let cronJobs = null;
 if (process.env.ENABLE_CRON_JOBS === "true") {

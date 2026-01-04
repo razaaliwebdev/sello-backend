@@ -108,21 +108,6 @@ router.get("/support-chats-debug", auth, async (req, res) => {
       .populate("participants", "name email avatar role")
       .limit(5);
 
-    console.log("Debug - Support chats found:", chats.length);
-    chats.forEach((chat, index) => {
-      console.log(`Chat ${index + 1}:`, {
-        _id: chat._id,
-        participants: chat.participants.map((p) => ({
-          _id: p._id,
-          name: p.name,
-          role: p.role,
-          email: p.email,
-        })),
-        subject: chat.subject,
-        lastMessage: chat.lastMessage,
-      });
-    });
-
     res.json({
       success: true,
       data: chats,

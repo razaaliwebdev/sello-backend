@@ -466,8 +466,11 @@ export const register = async (req, res) => {
         const adminUsers = await User.find({ role: "admin" }).select("_id");
         const siteName = process.env.SITE_NAME || "Sello";
         const clientUrl =
-          process.env.CLIENT_URL?.split(",")[0]?.trim() ||
-          "http://localhost:3000";
+          process.env.NODE_ENV === "production"
+            ? process.env.PRODUCTION_URL ||
+              process.env.CLIENT_URL?.split(",")[0]?.trim()
+            : process.env.CLIENT_URL?.split(",")[0]?.trim() ||
+              "http://localhost:5173";
 
         for (const admin of adminUsers) {
           await Notification.create({
@@ -705,19 +708,22 @@ export const login = async (req, res) => {
 };
 
 /**
- * Forgot Password Controller
+ * Forgot Password Controller (SECURE + JS)
  */
 export const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
+    const genericSuccessMessage =
+      "If an account exists with this email, you will receive a password reset code.";
 
+    /* 1. Basic Validation */
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required.",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required." });
     }
 
+    // Assuming isValidEmail is a utility function you've imported
     if (!isValidEmail(email)) {
       return res.status(400).json({
         success: false,
@@ -725,174 +731,71 @@ export const forgotPassword = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      // Don't reveal if user exists for security
-      return res.status(200).json({
-        success: true,
-        message: "If an account exists with this email, an OTP has been sent.",
-      });
+    /* 2. Lookup & Security Normalization */
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    // 🔐 SECURITY: Return the SAME response for non-existent OR suspended users.
+    // This prevents hackers from "guessing" which emails have active accounts.
+    if (!user || user.status === "suspended") {
+      Logger.warn(
+        `Password reset attempt for ${
+          !user ? "non-existent" : "suspended"
+        } email: ${normalizedEmail}`
+      );
+      return res
+        .status(200)
+        .json({ success: true, message: genericSuccessMessage });
     }
 
-    // Check user status
-    if (user.status === "suspended") {
-      return res.status(403).json({
-        success: false,
-        message: "Your account has been suspended. Please contact support.",
-      });
-    }
-
-    // Generate and save OTP
-    const otp = generateOtp();
+    /* 3. Generate & Save OTP */
+    const otp = generateOtp(); // Assuming this returns a 4-6 digit code
     user.otp = otp.toString();
-    user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+    user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 Minutes from now
+
+    // Save without running full validation (useful if other fields are required but missing)
     await user.save({ validateBeforeSave: false });
 
-    // Send OTP email
-    const subject = "SELLO - Password Reset OTP";
+    Logger.info(`OTP generated for: ${user.email}`);
+
+    /* 4. Send Email */
+    const subject = "SELLO – Password Reset Code";
     const html = `
-<div style="font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #fffdf7 0%, #fff8e9 100%); padding: 40px 0; max-width: 600px; margin: auto;">
-  <div style="background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(255, 166, 0, 0.15); border: 1px solid #fff0d0;">
-    <div style="background: linear-gradient(135deg, #FFA602 0%, #FF6B00 100%); padding: 30px 20px; text-align: center;">
-      <h1 style="margin: 0; color: white; font-size: 36px; font-weight: 700; letter-spacing: -0.5px;">
-        Password Reset - <span style="text-shadow: 0 2px 4px rgba(0,0,0,0.1);">SELLO</span> 🚗
-      </h1>
-      <div style="height: 4px; width: 80px; background: rgba(255,255,255,0.3); margin: 15px auto 0;"></div>
-    </div>
-    <div style="padding: 40px 30px;">
-      <p style="font-size: 18px; color: #555; line-height: 1.6; margin-bottom: 25px;">
-        Hi ${user.name || "User"},<br>
-        You requested to reset your password on <b style="color: #FF6B00;">SELLO</b>.
-      </p>
-      <p style="font-size: 17px; color: #444; line-height: 1.6;">
-        Please use this One-Time Password to reset your password:
-      </p>
-      <div style="background: #fef9f0; border-radius: 12px; padding: 25px; margin: 30px 0; text-align: center; border: 1px dashed #FFA602;">
-        <div style="font-size: 38px; font-weight: 800; color: #FF6B00; letter-spacing: 6px; padding: 10px; font-family: monospace;">
-          ${otp}
-        </div>
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
+        <h2 style="color: #333;">Password Reset</h2>
+        <p>Hello ${user.name || "User"},</p>
+        <p>Your password reset code is:</p>
+        <h1 style="background: #f4f4f4; padding: 10px; text-align: center; letter-spacing: 5px;">${otp}</h1>
+        <p>This code expires in <strong>10 minutes</strong>.</p>
+        <p>If you did not request this, please ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #eee;" />
+        <small style="color: #888;">© ${new Date().getFullYear()} SELLO</small>
       </div>
-      <div style="display: flex; align-items: center; background: #f8f9ff; border-radius: 10px; padding: 16px; margin-top: 30px;">
-        <div style="font-size: 24px; margin-right: 15px;">⏱️</div>
-        <p style="font-size: 14px; color: #666; margin: 0;">
-          <b>Important:</b> This code expires in <span style="color: #FF6B00;">10 minutes</span>.
-          Never share this code with anyone.
-        </p>
-      </div>
-    </div>
-    <div style="background: #fafafa; padding: 25px; text-align: center; border-top: 1px solid #f0f0f0;">
-      <p style="font-size: 18px; margin: 0 0 15px 0; color: #FF6B00; font-weight: 600;">
-        Stay Secure!
-      </p>
-      <p style="margin: 8px 0; font-size: 14px; color: #888;">
-        The SELLO Team
-      </p>
-      <p style="margin: 20px 0 0; font-size: 12px; color: #aaa;">
-        © ${new Date().getFullYear()} SELLO Automotive Marketplace. All rights reserved.
-      </p>
-    </div>
-  </div>
-</div>
-        `;
+    `;
 
     try {
-      // Send email asynchronously to prevent slow API responses
-      const emailResult = await sendEmail(user.email, subject, html, {
-        async: true,
-      });
-
-      // Check if email was actually sent
-      const isDevelopment =
-        process.env.NODE_ENV === "development" ||
-        !process.env.NODE_ENV ||
-        process.env.NODE_ENV === "dev";
-
-      if (
-        emailResult?.messageId === "dev-mode" ||
-        emailResult?.actuallySent === false
-      ) {
-        // OTP saved, email not sent in dev mode
-        Logger.warn(
-          "Forgot password email not sent (dev mode or SMTP not configured)",
-          {
-            email: user.email,
-            messageId: emailResult?.messageId,
-          }
-        );
-      } else if (emailResult?.actuallySent === true) {
-        Logger.info("Forgot password email sent successfully", {
-          email: user.email,
-          messageId: emailResult?.messageId,
-        });
-      }
+      await sendEmail(user.email, subject, html);
     } catch (emailError) {
-      Logger.error("Email sending error", emailError, {
-        email: user.email,
-        errorMessage: emailError.message,
-        errorCode: emailError.code,
-      });
-
-      // Check if SMTP is not configured
-      const isDevelopment =
-        process.env.NODE_ENV === "development" ||
-        !process.env.NODE_ENV ||
-        process.env.NODE_ENV === "dev";
-      const isMissingSMTP = emailError.message.includes(
-        "Email configuration is missing"
+      // Log the error but don't break the response
+      Logger.error(
+        `Failed to send reset email to ${user.email}: ${emailError.message}`
       );
-
-      // If SMTP is missing and we're in development, still return success
-      if (isMissingSMTP && isDevelopment) {
-        // Continue - don't return error, OTP is saved
-        Logger.warn("SMTP not configured in development mode", {
-          email: user.email,
-        });
-      } else if (isMissingSMTP) {
-        // Production mode but SMTP not configured - still return success since OTP is saved in DB
-        Logger.warn("SMTP not configured in production mode", {
-          email: user.email,
-        });
-      } else {
-        // Other email errors - clear OTP and return error
-        user.otp = null;
-        user.otpExpiry = null;
-        await user.save({ validateBeforeSave: false });
-
-        // Pass the actual error message to the client
-        let errorMessage = emailError.message || "Failed to send OTP.";
-        let statusCode = 500;
-
-        // If it's an SMTP authentication error, return 502 (Bad Gateway)
-        if (
-          emailError.message.includes("authentication failed") ||
-          emailError.message.includes("Authentication Failed") ||
-          emailError.message.includes("Invalid credentials") ||
-          emailError.responseCode === 535
-        ) {
-          errorMessage = "Email failed: " + emailError.message;
-          statusCode = 502; // Bad Gateway (Upstream error)
-        } else if (emailError.message.includes("SMTP")) {
-          statusCode = 500; // Internal Server Error
-        }
-
-        return res.status(statusCode).json({
-          success: false,
-          message: errorMessage,
-          error: isDevelopment ? emailError.message : undefined,
-        });
-      }
     }
 
+    /* 5. Final Response */
     return res.status(200).json({
       success: true,
-      message: "If an account exists with this email, an OTP has been sent.",
+      message: genericSuccessMessage,
     });
   } catch (error) {
-    Logger.error("Forgot Password Error", error, { email: req.body?.email });
+    Logger.error("Forgot Password Controller Error", {
+      message: error.message,
+      stack: error.stack,
+    });
+
     return res.status(500).json({
       success: false,
       message: "Server error. Please try again later.",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };

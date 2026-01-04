@@ -1,29 +1,37 @@
-import express from 'express';
+import express from "express";
 import {
-    register,
-    login,
-    forgotPassword,
-    verifyOtp,
-    resetPassword,
-    googleLogin,
-    logout,
-    refreshToken,
-    sendPhoneVerification,
-    verifyPhone,
-    logoutAllDevices
-} from '../controllers/authController.js';
-import { upload } from '../middlewares/multer.js';
-import { auth } from '../middlewares/authMiddleware.js';
-import { authLimiter, passwordResetLimiter } from '../middlewares/rateLimiter.js';
+  register,
+  login,
+  forgotPassword,
+  verifyOtp,
+  resetPassword,
+  googleLogin,
+  logout,
+  refreshToken,
+  sendPhoneVerification,
+  verifyPhone,
+  logoutAllDevices,
+} from "../controllers/authController.js";
+import { upload } from "../middlewares/multer.js";
+import { auth } from "../middlewares/authMiddleware.js";
+import {
+  authLimiter,
+  passwordResetLimiter,
+} from "../middlewares/rateLimiter.js";
 
 const router = express.Router();
 
 // Public Authentication Routes with rate limiting
 // Use fields for dealer registration (avatar + cnicFile)
-router.post("/register", authLimiter, upload.fields([
-    { name: 'avatar', maxCount: 1 },
-    { name: 'cnicFile', maxCount: 1 }
-]), register);
+router.post(
+  "/register",
+  authLimiter,
+  upload.fields([
+    { name: "avatar", maxCount: 1 },
+    { name: "cnicFile", maxCount: 1 },
+  ]),
+  register
+);
 router.post("/login", authLimiter, login);
 router.post("/refresh-token", authLimiter, refreshToken); // Refresh token endpoint
 router.post("/forgot-password", passwordResetLimiter, forgotPassword);

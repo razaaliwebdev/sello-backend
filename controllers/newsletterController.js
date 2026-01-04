@@ -1,40 +1,42 @@
-import Newsletter from '../models/newsletterModel.js';
-import sendEmail from '../utils/sendEmail.js';
+import Newsletter from "../models/newsletterModel.js";
+import sendEmail from "../utils/sendEmail.js";
 
 /**
  * Subscribe to Newsletter
  */
 export const subscribeNewsletter = async (req, res) => {
-    try {
-        const { email } = req.body;
+  try {
+    const { email } = req.body;
 
-        if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-            return res.status(400).json({
-                success: false,
-                message: "Please provide a valid email address."
-            });
-        }
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
+    }
 
-        // Check if email already exists
-        const existingSubscriber = await Newsletter.findOne({ email: email.toLowerCase() });
+    // Check if email already exists
+    const existingSubscriber = await Newsletter.findOne({
+      email: email.toLowerCase(),
+    });
 
-        if (existingSubscriber) {
-            if (existingSubscriber.status === 'subscribed') {
-                return res.status(200).json({
-                    success: true,
-                    message: "You are already subscribed to our newsletter!",
-                    data: existingSubscriber
-                });
-            } else {
-                // Re-subscribe
-                existingSubscriber.status = 'subscribed';
-                existingSubscriber.subscribedAt = new Date();
-                existingSubscriber.unsubscribedAt = null;
-                await existingSubscriber.save();
+    if (existingSubscriber) {
+      if (existingSubscriber.status === "subscribed") {
+        return res.status(200).json({
+          success: true,
+          message: "You are already subscribed to our newsletter!",
+          data: existingSubscriber,
+        });
+      } else {
+        // Re-subscribe
+        existingSubscriber.status = "subscribed";
+        existingSubscriber.subscribedAt = new Date();
+        existingSubscriber.unsubscribedAt = null;
+        await existingSubscriber.save();
 
-                // Send welcome back email
-                try {
-                    const welcomeBackHtml = `
+        // Send welcome back email
+        try {
+          const welcomeBackHtml = `
                         <!DOCTYPE html>
                         <html>
                         <head>
@@ -71,29 +73,36 @@ export const subscribeNewsletter = async (req, res) => {
                         </body>
                         </html>
                     `;
-                    await sendEmail(email.toLowerCase(), 'Welcome Back to Sello Newsletter!', welcomeBackHtml);
-                } catch (emailError) {
-                    console.error("Newsletter welcome back email error:", emailError.message);
-                }
-
-                return res.status(200).json({
-                    success: true,
-                    message: "Successfully re-subscribed to our newsletter!",
-                    data: existingSubscriber
-                });
-            }
+          await sendEmail(
+            email.toLowerCase(),
+            "Welcome Back to Sello Newsletter!",
+            welcomeBackHtml
+          );
+        } catch (emailError) {
+          console.error(
+            "Newsletter welcome back email error:",
+            emailError.message
+          );
         }
 
-        // Create new subscription
-        const subscriber = await Newsletter.create({
-            email: email.toLowerCase(),
-            status: 'subscribed',
-            source: 'website'
+        return res.status(200).json({
+          success: true,
+          message: "Successfully re-subscribed to our newsletter!",
+          data: existingSubscriber,
         });
+      }
+    }
 
-        // Send welcome email
-        try {
-            const welcomeHtml = `
+    // Create new subscription
+    const subscriber = await Newsletter.create({
+      email: email.toLowerCase(),
+      status: "subscribed",
+      source: "website",
+    });
+
+    // Send welcome email
+    try {
+      const welcomeHtml = `
                 <!DOCTYPE html>
                 <html>
                 <head>
@@ -123,7 +132,13 @@ export const subscribeNewsletter = async (req, res) => {
                             Stay tuned for our next update!
                         </p>
                         <div style="text-align: center; margin: 30px 0;">
-                            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" style="background-color: #FF6B35; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">Visit Sello</a>
+                            <a href="${
+                              process.env.NODE_ENV === "production"
+                                ? process.env.PRODUCTION_URL ||
+                                  process.env.FRONTEND_URL
+                                : process.env.FRONTEND_URL ||
+                                  "http://localhost:5173"
+                            }" style="background-color: #FF6B35; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">Visit Sello</a>
                         </div>
                         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
                         <p style="color: #999; font-size: 12px; margin-bottom: 0;">
@@ -133,132 +148,136 @@ export const subscribeNewsletter = async (req, res) => {
                 </body>
                 </html>
             `;
-            await sendEmail(email.toLowerCase(), 'Welcome to Sello Newsletter!', welcomeHtml);
-            console.log(`✓ Newsletter welcome email sent to ${email}`);
-        } catch (emailError) {
-            console.error("Newsletter welcome email error:", emailError.message);
-            // Still return success even if email fails
-        }
-
-        return res.status(201).json({
-            success: true,
-            message: "Successfully subscribed to our newsletter! Check your email for confirmation.",
-            data: subscriber
-        });
-    } catch (error) {
-        console.error("Subscribe Newsletter Error:", error.message);
-        
-        // Handle duplicate key error
-        if (error.code === 11000) {
-            return res.status(200).json({
-                success: true,
-                message: "You are already subscribed to our newsletter!",
-            });
-        }
-
-        return res.status(500).json({
-            success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+      await sendEmail(
+        email.toLowerCase(),
+        "Welcome to Sello Newsletter!",
+        welcomeHtml
+      );
+      console.log(`✓ Newsletter welcome email sent to ${email}`);
+    } catch (emailError) {
+      console.error("Newsletter welcome email error:", emailError.message);
+      // Still return success even if email fails
     }
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Successfully subscribed to our newsletter! Check your email for confirmation.",
+      data: subscriber,
+    });
+  } catch (error) {
+    console.error("Subscribe Newsletter Error:", error.message);
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(200).json({
+        success: true,
+        message: "You are already subscribed to our newsletter!",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
 
 /**
  * Unsubscribe from Newsletter
  */
 export const unsubscribeNewsletter = async (req, res) => {
-    try {
-        const { email } = req.body;
+  try {
+    const { email } = req.body;
 
-        if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-            return res.status(400).json({
-                success: false,
-                message: "Please provide a valid email address."
-            });
-        }
-
-        const subscriber = await Newsletter.findOne({ email: email.toLowerCase() });
-
-        if (!subscriber) {
-            return res.status(404).json({
-                success: false,
-                message: "Email not found in our newsletter list."
-            });
-        }
-
-        if (subscriber.status === 'unsubscribed') {
-            return res.status(200).json({
-                success: true,
-                message: "You are already unsubscribed."
-            });
-        }
-
-        subscriber.status = 'unsubscribed';
-        subscriber.unsubscribedAt = new Date();
-        await subscriber.save();
-
-        return res.status(200).json({
-            success: true,
-            message: "Successfully unsubscribed from our newsletter."
-        });
-    } catch (error) {
-        console.error("Unsubscribe Newsletter Error:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
     }
+
+    const subscriber = await Newsletter.findOne({ email: email.toLowerCase() });
+
+    if (!subscriber) {
+      return res.status(404).json({
+        success: false,
+        message: "Email not found in our newsletter list.",
+      });
+    }
+
+    if (subscriber.status === "unsubscribed") {
+      return res.status(200).json({
+        success: true,
+        message: "You are already unsubscribed.",
+      });
+    }
+
+    subscriber.status = "unsubscribed";
+    subscriber.unsubscribedAt = new Date();
+    await subscriber.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Successfully unsubscribed from our newsletter.",
+    });
+  } catch (error) {
+    console.error("Unsubscribe Newsletter Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
 
 /**
  * Get All Newsletter Subscribers (Admin only)
  */
 export const getAllSubscribers = async (req, res) => {
-    try {
-        if (req.user?.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: "Only admins can view subscribers."
-            });
-        }
-
-        const { status, page = 1, limit = 50 } = req.query;
-        const skip = (parseInt(page) - 1) * parseInt(limit);
-
-        const query = {};
-        if (status) {
-            query.status = status;
-        }
-
-        const subscribers = await Newsletter.find(query)
-            .sort({ subscribedAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        const total = await Newsletter.countDocuments(query);
-
-        return res.status(200).json({
-            success: true,
-            message: "Subscribers retrieved successfully.",
-            data: {
-                subscribers,
-                pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    total,
-                    pages: Math.ceil(total / parseInt(limit))
-                }
-            }
-        });
-    } catch (error) {
-        console.error("Get All Subscribers Error:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error. Please try again later.",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+  try {
+    if (req.user?.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can view subscribers.",
+      });
     }
-};
 
+    const { status, page = 1, limit = 50 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = {};
+    if (status) {
+      query.status = status;
+    }
+
+    const subscribers = await Newsletter.find(query)
+      .sort({ subscribedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Newsletter.countDocuments(query);
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscribers retrieved successfully.",
+      data: {
+        subscribers,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get All Subscribers Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};

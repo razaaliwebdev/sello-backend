@@ -697,8 +697,11 @@ export const deleteUser = async (req, res) => {
       const sendEmail = (await import("../utils/sendEmail.js")).default;
       const siteName = process.env.SITE_NAME || "Sello";
       const clientUrl =
-        process.env.CLIENT_URL?.split(",")[0]?.trim() ||
-        "http://localhost:3000";
+        process.env.NODE_ENV === "production"
+          ? process.env.PRODUCTION_URL ||
+            process.env.CLIENT_URL?.split(",")[0]?.trim()
+          : process.env.CLIENT_URL?.split(",")[0]?.trim() ||
+            "http://localhost:5173";
 
       const emailSubject = `Account Deleted - ${siteName}`;
 
@@ -1200,11 +1203,7 @@ export const featureCar = async (req, res) => {
 
     if (updateResult.modifiedCount === 0) {
       // Car was found but not modified (might already have the same value)
-      console.log("Car featured status unchanged:", {
-        carId,
-        featuredValue,
-        currentValue: car.featured,
-      });
+      // This is not an error, just informational
     }
 
     return res.status(200).json({

@@ -19,45 +19,100 @@ const ROLE_PRESETS = {
     purpose:
       "Full access - Unrestricted system control; manage platform, teams, operations and security",
     permissions: {
+      // User & Role Management
       manageUsers: true,
       createRoles: true,
       editRoles: true,
       deleteRoles: true,
       inviteUsers: true,
       resetPasswords: true,
+
+      // Listings Management
       viewListings: true,
       approveListings: true,
       editListings: true,
       deleteListings: true,
       featureListings: true,
+
+      // Dealers Management
       viewDealers: true,
       approveDealers: true,
       editDealers: true,
+      deleteDealers: true,
       manageDealerSubscriptions: true,
       viewDealerPerformance: true,
+
+      // Content Management
+      viewBlogs: true,
+      createBlogs: true,
+      editBlogs: true,
       manageBlogs: true,
       publishBlogs: true,
+      deleteBlogs: true,
       moderateComments: true,
+
+      // Categories
+      viewCategories: true,
+      createCategories: true,
+      editCategories: true,
+      deleteCategories: true,
+      manageCategories: true,
+      manageCarTypes: true,
+
+      // Promotions & Notifications
+      viewPromotions: true,
+      createPromotions: true,
+      editPromotions: true,
+      deletePromotions: true,
       managePromotions: true,
+      viewNotifications: true,
+      createNotifications: true,
+      editNotifications: true,
+      deleteNotifications: true,
       createPushNotifications: true,
       sendPushNotifications: true,
+
+      // Support & Communication
       accessChatbot: true,
       viewChatbotLogs: true,
+      createChatLogs: true,
+      editChatLogs: true,
+      deleteChatLogs: true,
       manageSupportTickets: true,
+      createSupportTickets: true,
+      deleteSupportTickets: true,
       respondToInquiries: true,
       escalateIssues: true,
+
+      // Platform Settings
       managePlatformSettings: true,
+      viewSettings: true,
+      createSettings: true,
+      editSettings: true,
+      deleteSettings: true,
       manageLogo: true,
       manageLanguage: true,
       manageCurrency: true,
       manageCommission: true,
       manageIntegrations: true,
+      manageBanners: true,
+
+      // Analytics & Reports
       viewAnalytics: true,
       viewFinancialReports: true,
       exportReports: true,
-      manageCategories: true,
-      manageCarTypes: true,
-      manageBanners: true,
+
+      // Testimonials
+      viewTestimonials: true,
+      manageTestimonials: true,
+
+      // Inquiries
+      viewInquiries: true,
+      createInquiries: true,
+      editInquiries: true,
+      deleteInquiries: true,
+
+      // Audit & Security
       viewAuditLogs: true,
       viewUserProfiles: true,
       viewFullUserProfiles: true,
@@ -70,29 +125,47 @@ const ROLE_PRESETS = {
     name: "Marketing Team",
     displayName: "Marketing Team",
     accessLevel: "MEDIUM_HIGH",
-    purpose:
-      "Dealer access, handle normal users, manage blogs, edit posts, resolve issues",
+    purpose: "Content marketing, blogs, promotions, and customer engagement",
     permissions: {
-      viewDealers: true,
-      approveDealers: true,
-      editDealers: true,
-      manageDealerSubscriptions: true,
-      viewDealerPerformance: true,
-      viewUserProfiles: true,
+      // Content Management
+      viewBlogs: true,
+      createBlogs: true,
+      editBlogs: true,
       manageBlogs: true,
       publishBlogs: true,
-      editListings: true,
       moderateComments: true,
+
+      // Promotions & Marketing
+      viewPromotions: true,
+      createPromotions: true,
+      editPromotions: true,
       managePromotions: true,
-      manageSupportTickets: true,
-      respondToInquiries: true,
-      escalateIssues: true,
+
+      // Notifications
+      viewNotifications: true,
+      createNotifications: true,
+      sendPushNotifications: true,
+
+      // Customer Engagement
+      viewTestimonials: true,
+      manageTestimonials: true,
+
+      // Categories
+      viewCategories: true,
       manageCategories: true,
+
+      // Limited Analytics
+      viewAnalytics: true,
+
+      // Customer Support
+      viewInquiries: true,
+      respondToInquiries: true,
     },
     restrictions: [
       "Cannot access financial reports or sensitive platform settings",
       "Cannot create or delete roles",
-      "Cannot reset passwords or manage system integrations",
+      "Cannot manage users or dealers",
+      "Cannot change system integrations",
     ],
     isPreset: true,
   },
@@ -100,22 +173,33 @@ const ROLE_PRESETS = {
     name: "Support Agent",
     displayName: "Support Agent",
     accessLevel: "MEDIUM",
-    purpose: "Can access dealers and listings for support purposes",
+    purpose: "Customer support, chat management, and issue resolution",
     permissions: {
-      viewDealers: true,
-      editDealers: true,
-      viewListings: true,
-      editListings: true,
-      accessChatbot: true,
-      viewChatbotLogs: true,
+      // Customer Support
       manageSupportTickets: true,
+      createSupportTickets: true,
       respondToInquiries: true,
       escalateIssues: true,
+
+      // Communication
+      accessChatbot: true,
+      viewChatbotLogs: true,
+
+      // Information Access (Read-only)
+      viewDealers: true,
+      viewListings: true,
+      viewInquiries: true,
+      createInquiries: true,
+      editInquiries: true,
+
+      // Basic Content Management
+      moderateComments: true,
     },
     restrictions: [
       "Cannot approve dealers or listings",
       "Cannot manage users or financial data",
       "Cannot change role permissions or system settings",
+      "Cannot delete or edit critical business data",
     ],
     isPreset: true,
   },
@@ -126,14 +210,35 @@ const ROLE_PRESETS = {
     purpose:
       "Access blogs management, posts, upload banners, send notifications",
     permissions: {
+      // Blog Management
+      viewBlogs: true,
+      createBlogs: true,
+      editBlogs: true,
       manageBlogs: true,
       publishBlogs: true,
       moderateComments: true,
-      createPushNotifications: true,
-      sendPushNotifications: true,
+
+      // Content Management
+      viewPromotions: true,
+      createPromotions: true,
+      editPromotions: true,
       managePromotions: true,
+
+      // Notifications
+      viewNotifications: true,
+      createNotifications: true,
+      sendPushNotifications: true,
+
+      // Categories
+      viewCategories: true,
       manageCategories: true,
+
+      // Banners
       manageBanners: true,
+
+      // Testimonials
+      viewTestimonials: true,
+      manageTestimonials: true,
     },
     restrictions: [
       "Cannot manage users, dealers or listings",
@@ -776,7 +881,8 @@ export const inviteUser = async (req, res) => {
     // Use production URL if in production, otherwise use CLIENT_URL or localhost
     const frontendUrl =
       process.env.NODE_ENV === "production"
-        ? "https://sello.pk"
+        ? process.env.PRODUCTION_URL ||
+          process.env.CLIENT_URL?.split(",")[0]?.trim()
         : process.env.CLIENT_URL?.split(",")[0]?.trim() ||
           (req.headers.origin ? new URL(req.headers.origin).origin : null) ||
           "http://localhost:5173";
@@ -961,6 +1067,16 @@ export const inviteUser = async (req, res) => {
 
     return res.status(201).json(responseData);
   } catch (error) {
+    // Prevent double response sending
+    if (res.headersSent) {
+      Logger.error("Invite User Error - Response already sent", error, {
+        email: req.body?.email,
+        role: req.body?.role,
+        userId: req.user?._id,
+      });
+      return;
+    }
+
     Logger.error("Invite User Error", error, {
       email: req.body?.email,
       role: req.body?.role,
@@ -1199,7 +1315,8 @@ export const resendInvite = async (req, res) => {
     // Send email
     const clientUrl =
       process.env.NODE_ENV === "production"
-        ? "https://sello.pk"
+        ? process.env.PRODUCTION_URL ||
+          process.env.CLIENT_URL?.split(",")[0]?.trim()
         : process.env.CLIENT_URL?.split(",")[0]?.trim() ||
           "http://localhost:5173";
 

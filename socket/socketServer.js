@@ -401,8 +401,11 @@ export const initializeSocket = (server) => {
 
               const siteName = process.env.SITE_NAME || "Sello";
               const clientUrl =
-                process.env.CLIENT_URL?.split(",")[0]?.trim() ||
-                "https://sello.ae";
+                process.env.NODE_ENV === "production"
+                  ? process.env.PRODUCTION_URL ||
+                    process.env.CLIENT_URL?.split(",")[0]?.trim()
+                  : process.env.CLIENT_URL?.split(",")[0]?.trim() ||
+                    "http://localhost:5173";
               const emailEnabled =
                 process.env.ENABLE_EMAIL_NOTIFICATIONS === "true";
 

@@ -89,7 +89,7 @@ export const authLimiter = rateLimit({
  */
 export const passwordResetLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: process.env.NODE_ENV === "production" ? 3 : 1000, // Very high limit in dev
+  max: process.env.NODE_ENV === "production" ? 3 : 100, // 3 attempts per hour in production
   message: {
     success: false,
     message: "Too many password reset attempts, please try again after 1 hour.",
@@ -104,9 +104,23 @@ export const passwordResetLimiter = rateLimit({
   keyGenerator: (req) => {
     // Use email if provided, otherwise IP with IPv6 support
     if (req.body?.email || req.headers?.email) {
-      return req.body?.email || req.headers?.email;
+      return (req.body?.email || req.headers?.email)?.toLowerCase();
     }
     return ipKeyGenerator(req) || "unknown";
+  },
+  handler: (req, res) => {
+    Logger.warn("Password reset rate limit exceeded", {
+      email: req.body?.email?.toLowerCase(),
+      ip: req.ip,
+      userAgent: req.get("User-Agent"),
+      timestamp: new Date().toISOString(),
+    });
+
+    res.status(429).json({
+      success: false,
+      message:
+        "Too many password reset attempts, please try again after 1 hour.",
+    });
   },
 });
 
