@@ -647,6 +647,27 @@ export const editCar = async (req, res) => {
     // Extract fields from request body
     const updateData = { ...req.body };
 
+    // Handle Status Changes (Sold/Active)
+    if (updateData.status) {
+      if (updateData.status === "sold" && car.status !== "sold") {
+        updateData.soldDate = new Date();
+        updateData.isSold = true; // Legacy support
+        // Auto-remove boost and featured status when sold
+        updateData.isBoosted = false;
+        updateData.featured = false;
+      } else if (updateData.status === "active" && car.status === "sold") {
+        // Re-activating a sold car
+        updateData.soldDate = null;
+        updateData.isSold = false;
+        // Reset expiry if expired
+        if (car.expiryDate && new Date(car.expiryDate) < new Date()) {
+          const newExpiry = new Date();
+          newExpiry.setDate(newExpiry.getDate() + 90);
+          updateData.expiryDate = newExpiry;
+        }
+      }
+    }
+
     // Normalize make/model if being updated (for data consistency)
     if (updateData.make && typeof updateData.make === "string") {
       updateData.make = updateData.make

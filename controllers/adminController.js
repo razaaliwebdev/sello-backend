@@ -7,6 +7,9 @@ import {
   getCarApprovedTemplate,
   getCarRejectedTemplate,
 } from "../utils/emailTemplates.js";
+import CustomerRequest from "../models/customerRequestModel.js";
+import ListingHistory from "../models/listingHistoryModel.js";
+import { getAuditLogs } from "../utils/auditLogger.js";
 
 /**
  * Admin Dashboard Stats

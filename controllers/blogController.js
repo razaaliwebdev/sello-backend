@@ -1,5 +1,6 @@
 import Blog from "../models/blogModel.js";
 import Category from "../models/categoryModel.js";
+import BlogView from "../models/blogViewModel.js";
 import mongoose from "mongoose";
 import { uploadCloudinary } from "../utils/cloudinary.js";
 
@@ -130,7 +131,9 @@ export const createBlog = async (req, res) => {
       metaTitle: metaTitle || title,
       metaDescription: metaDescription || excerpt || content.substring(0, 160),
       metaKeywords: metaKeywords || "",
-      publishedAt: status === "published" ? new Date() : null,
+      publishedAt: req.body.publishedAt 
+        ? new Date(req.body.publishedAt) 
+        : (status === "published" ? new Date() : null),
     });
 
     return res.status(201).json({
@@ -265,8 +268,16 @@ export const getBlogById = async (req, res) => {
       (!req.user || req.user.role !== "admin") &&
       blog.status === "published"
     ) {
+      // Fire and forget view tracking
       blog.views += 1;
-      await blog.save({ validateBeforeSave: false });
+      blog.save({ validateBeforeSave: false }).catch(err => console.error("Error saving blog view count:", err));
+      
+      BlogView.create({
+        blog: blog._id,
+        ip: req.ip,
+        userAgent: req.get("User-Agent"),
+        user: req.user?._id
+      }).catch(err => console.error("Error creating blog view record:", err));
     }
 
     return res.status(200).json({
@@ -349,12 +360,20 @@ export const updateBlog = async (req, res) => {
         ? tags
         : tags.split(",").map((t) => t.trim());
     }
+    
+    // Handle status and publishedAt
     if (status) {
       blog.status = status;
-      if (status === "published" && !blog.publishedAt) {
-        blog.publishedAt = new Date();
-      }
     }
+    
+    // Allow updating publishedAt manually (e.g. for scheduling or backdating)
+    if (req.body.publishedAt) {
+      blog.publishedAt = new Date(req.body.publishedAt);
+    } else if (status === "published" && !blog.publishedAt) {
+      // If publishing now and no date set, set to now
+      blog.publishedAt = new Date();
+    }
+    
     if (isFeatured !== undefined) blog.isFeatured = isFeatured;
     if (metaTitle) blog.metaTitle = metaTitle;
     if (metaDescription) blog.metaDescription = metaDescription;
@@ -440,6 +459,65 @@ export const deleteBlog = async (req, res) => {
       success: false,
       message: "Server error. Please try again later.",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
+/**
+ * Get Blog Analytics (Views over time)
+ */
+export const getBlogAnalytics = async (req, res) => {
+  try {
+    const { blogId } = req.params;
+    const days = parseInt(req.query.days) || 30; // Default 30 days
+
+    if (!mongoose.Types.ObjectId.isValid(blogId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid blog ID.",
+      });
+    }
+
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const views = await BlogView.aggregate([
+      {
+        $match: {
+          blog: new mongoose.Types.ObjectId(blogId),
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    // Fill in missing dates with 0 views
+    const analytics = [];
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split("T")[0];
+      const found = views.find((v) => v._id === dateStr);
+      analytics.push({
+        date: dateStr,
+        views: found ? found.count : 0,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: analytics,
+    });
+  } catch (error) {
+    console.error("Get Blog Analytics Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Server error.",
     });
   }
 };
