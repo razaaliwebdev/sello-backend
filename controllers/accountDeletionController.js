@@ -1,7 +1,13 @@
 import AccountDeletionRequest from "../models/accountDeletionRequestModel.js";
 import User from "../models/userModel.js";
+import Car from "../models/carModel.js";
 import Logger from "../utils/logger.js";
 import Notification from "../models/notificationModel.js";
+import sendEmail from "../utils/sendEmail.js";
+import {
+  getAccountDeletionApprovedTemplate,
+  getAccountDeletionRejectedTemplate,
+} from "../utils/emailTemplates.js";
 
 /**
  * Create account deletion request
@@ -238,6 +244,38 @@ export const reviewDeletionRequest = async (req, res) => {
 
     await deletionRequest.save();
 
+    // Send email notification to user
+    try {
+      const emailTemplate =
+        status === "approved"
+          ? getAccountDeletionApprovedTemplate(deletionRequest.user.name)
+          : getAccountDeletionRejectedTemplate(
+              deletionRequest.user.name,
+              reviewNotes
+            );
+
+      const emailSubject =
+        status === "approved"
+          ? "Account Deletion Approved - SELLO"
+          : "Account Deletion Request Rejected - SELLO";
+
+      await sendEmail(deletionRequest.user.email, emailSubject, emailTemplate);
+
+      Logger.info("Account deletion email sent successfully", {
+        requestId: deletionRequest._id,
+        userId: deletionRequest.user._id,
+        userEmail: deletionRequest.user.email,
+        action: status,
+      });
+    } catch (emailError) {
+      Logger.error("Failed to send account deletion email", emailError, {
+        requestId: deletionRequest._id,
+        userId: deletionRequest.user._id,
+        userEmail: deletionRequest.user.email,
+      });
+      // Continue even if email fails
+    }
+
     // Create notification for the user about admin action
     try {
       const notificationTitle =
@@ -339,7 +377,7 @@ export const reviewDeletionRequest = async (req, res) => {
 /**
  * Helper function to delete user account and associated data
  */
-const deleteUserAccount = async (userId) => {
+export const deleteUserAccount = async (userId) => {
   try {
     const user = await User.findById(userId);
     if (!user) {

@@ -131,9 +131,11 @@ export const createBlog = async (req, res) => {
       metaTitle: metaTitle || title,
       metaDescription: metaDescription || excerpt || content.substring(0, 160),
       metaKeywords: metaKeywords || "",
-      publishedAt: req.body.publishedAt 
-        ? new Date(req.body.publishedAt) 
-        : (status === "published" ? new Date() : null),
+      publishedAt: req.body.publishedAt
+        ? new Date(req.body.publishedAt)
+        : status === "published"
+        ? new Date()
+        : null,
     });
 
     return res.status(201).json({
@@ -143,6 +145,17 @@ export const createBlog = async (req, res) => {
     });
   } catch (error) {
     console.error("Create Blog Error:", error.message);
+
+    // Handle specific timeout errors
+    if (error.message && error.message.includes("timeout")) {
+      return res.status(408).json({
+        success: false,
+        message:
+          "Blog creation timed out. This may be due to large image uploads. Please try with smaller images or fewer images.",
+        code: "BLOG_CREATION_TIMEOUT",
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Server error. Please try again later.",
@@ -270,14 +283,16 @@ export const getBlogById = async (req, res) => {
     ) {
       // Fire and forget view tracking
       blog.views += 1;
-      blog.save({ validateBeforeSave: false }).catch(err => console.error("Error saving blog view count:", err));
-      
+      blog
+        .save({ validateBeforeSave: false })
+        .catch((err) => console.error("Error saving blog view count:", err));
+
       BlogView.create({
         blog: blog._id,
         ip: req.ip,
         userAgent: req.get("User-Agent"),
-        user: req.user?._id
-      }).catch(err => console.error("Error creating blog view record:", err));
+        user: req.user?._id,
+      }).catch((err) => console.error("Error creating blog view record:", err));
     }
 
     return res.status(200).json({
@@ -360,12 +375,12 @@ export const updateBlog = async (req, res) => {
         ? tags
         : tags.split(",").map((t) => t.trim());
     }
-    
+
     // Handle status and publishedAt
     if (status) {
       blog.status = status;
     }
-    
+
     // Allow updating publishedAt manually (e.g. for scheduling or backdating)
     if (req.body.publishedAt) {
       blog.publishedAt = new Date(req.body.publishedAt);
@@ -373,7 +388,7 @@ export const updateBlog = async (req, res) => {
       // If publishing now and no date set, set to now
       blog.publishedAt = new Date();
     }
-    
+
     if (isFeatured !== undefined) blog.isFeatured = isFeatured;
     if (metaTitle) blog.metaTitle = metaTitle;
     if (metaDescription) blog.metaDescription = metaDescription;
@@ -500,7 +515,11 @@ export const getBlogAnalytics = async (req, res) => {
 
     // Fill in missing dates with 0 views
     const analytics = [];
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    for (
+      let d = new Date(startDate);
+      d <= endDate;
+      d.setDate(d.getDate() + 1)
+    ) {
       const dateStr = d.toISOString().split("T")[0];
       const found = views.find((v) => v._id === dateStr);
       analytics.push({

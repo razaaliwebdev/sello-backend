@@ -233,6 +233,17 @@ export const register = async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Check if auto-approve dealers is enabled
+    const autoApproveDealersSetting = await Settings.findOne({
+      key: "autoApproveDealers",
+    });
+    const autoApproveDealers =
+      autoApproveDealersSetting &&
+      (autoApproveDealersSetting.value === true ||
+        autoApproveDealersSetting.value === "true" ||
+        autoApproveDealersSetting.value === 1 ||
+        autoApproveDealersSetting.value === "1");
+
     // Prepare user data
     const userData = {
       name: name.trim(),
@@ -317,17 +328,6 @@ export const register = async (req, res) => {
           return null;
         }
       };
-
-      // Check if auto-approve dealers is enabled
-      const autoApproveDealersSetting = await Settings.findOne({
-        key: "autoApproveDealers",
-      });
-      const autoApproveDealers =
-        autoApproveDealersSetting &&
-        (autoApproveDealersSetting.value === true ||
-          autoApproveDealersSetting.value === "true" ||
-          autoApproveDealersSetting.value === 1 ||
-          autoApproveDealersSetting.value === "1");
 
       // Parse JSON strings if they exist
       let parsedSpecialties = [];

@@ -153,7 +153,7 @@ export const subscribeNewsletter = async (req, res) => {
         "Welcome to Sello Newsletter!",
         welcomeHtml
       );
-      console.log(`✓ Newsletter welcome email sent to ${email}`);
+      // Newsletter welcome email sent successfully
     } catch (emailError) {
       console.error("Newsletter welcome email error:", emailError.message);
       // Still return success even if email fails

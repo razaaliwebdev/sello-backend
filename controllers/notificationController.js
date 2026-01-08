@@ -74,18 +74,21 @@ export const createNotification = async (req, res) => {
           role: { $ne: "admin" },
         }).select("_id email name verified status role");
 
-        console.log(
-          `[Notification] Found ${users.length} non-admin users to send notifications to`
-        );
+        // Found non-admin users to send notifications to
 
         if (users.length > 0) {
+          // Create notifications for all found users
+          const userNotifications = users.map((u) => ({
+            id: u._id,
+            email: u.email,
+            verified: u.verified,
+            status: u.status,
+            role: u.role,
+          }));
+
           console.log(
-            `[Notification] Sample users:`,
-            users.slice(0, 3).map((u) => ({
-              email: u.email,
-              status: u.status,
-              role: u.role,
-            }))
+            "Found users for notifications:",
+            userNotifications.length
           );
         }
 
@@ -98,19 +101,14 @@ export const createNotification = async (req, res) => {
             .select("_id email name verified status role")
             .limit(5);
 
-          console.log(
-            `[Notification] No users found. Total non-admin users: ${totalUsers}`
-          );
-          console.log(
-            `[Notification] Sample users:`,
-            sampleUsers.map((u) => ({
-              id: u._id,
-              email: u.email,
-              verified: u.verified,
-              status: u.status,
-              role: u.role,
-            }))
-          );
+          // No users found, showing sample
+          const debugSample = sampleUsers.map((u) => ({
+            id: u._id,
+            email: u.email,
+            verified: u.verified,
+            status: u.status,
+            role: u.role,
+          }));
 
           return res.status(400).json({
             success: false,

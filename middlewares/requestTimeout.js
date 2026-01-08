@@ -16,7 +16,11 @@ export const requestTimeout = (defaultTimeoutMs = 30000) => {
 
     // Longer timeouts for admin operations and file uploads
     if (req.path.startsWith("/api/admin")) {
-      timeoutMs = 60000; // 60 seconds for admin operations
+      if (req.path.includes("/blogs")) {
+        timeoutMs = 300000; // 5 minutes for blog creation with images
+      } else {
+        timeoutMs = 60000; // 60 seconds for other admin operations
+      }
     } else if (req.path.includes("/upload") || req.path.includes("/import")) {
       timeoutMs = 120000; // 2 minutes for file operations
     } else if (req.method === "DELETE" && req.path.includes("/role")) {

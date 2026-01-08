@@ -1451,7 +1451,7 @@ export const verifyDealer = async (req, res) => {
                                 <li>✅ Access to dealer-specific features</li>
                             </ul>
                             <div style="margin: 30px 0; text-align: center;">
-                                <a href="${clientUrl}/dealer-dashboard" style="background-color: #FFA602; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                                <a href="${clientUrl}/dealer/dashboard" style="background-color: #FFA602; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
                                     Go to Dealer Dashboard
                                 </a>
                             </div>

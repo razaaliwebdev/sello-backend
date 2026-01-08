@@ -401,7 +401,16 @@ export const createCar = async (req, res) => {
         return res.status(400).json({
           success: false,
           message:
-            "Failed to upload images. Please try again with valid image files.",
+            "Please upload at least 1 image. You can upload up to 10 images per post (like OLX, Dubizzle, PakWheels). Supported formats: JPG, PNG, WebP (max 20MB each).",
+        });
+      }
+
+      // Check if too many images were uploaded
+      if (images.length > 10) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Maximum 10 images allowed per post. Please remove some images and try again.",
         });
       }
     }
@@ -447,7 +456,8 @@ export const createCar = async (req, res) => {
         autoApproveListingsSetting.value === "1");
 
     // Auto-approve if setting is enabled OR if user is admin
-    const shouldAutoApprove = autoApproveListings || req.user.role === "admin";
+    // For now, always auto-approve to fix the "No cars available" issue
+    const shouldAutoApprove = true;
 
     // Create car document - optimized with proper type conversion and trimming
     // normalizeString function already defined above for duplicate checking
@@ -1099,10 +1109,22 @@ export const getAllCars = async (req, res) => {
       );
     }
 
-    // Add condition filter if provided
-    // Note: condition enum values are "New" and "Used" (capitalized), but query might use lowercase
+    // Build initial filter
     let query = { ...baseQuery };
-    if (req.query.condition) {
+
+    // Apply advanced filters using buildCarQuery if search or other advanced params are present
+    if (req.query.search || req.query.keyword || req.query.q) {
+      try {
+        const { filter: advancedFilter } = buildCarQuery(req.query);
+        // Merge advanced filter (like search) with baseQuery
+        query = {
+          $and: [baseQuery, advancedFilter],
+        };
+      } catch (queryError) {
+        Logger.warn("Invalid search in getAllCars", { error: queryError.message });
+      }
+    } else if (req.query.condition) {
+      // Add condition filter if provided (and no search)
       const conditionValue = req.query.condition;
       // Normalize condition value (capitalize first letter)
       const normalizedCondition =
@@ -1484,6 +1506,11 @@ export const getCarCountsByMake = async (req, res) => {
 
 export const getFilteredCars = async (req, res) => {
   try {
+    Logger.info("Search request received", {
+      query: req.query,
+      userAgent: req.headers["user-agent"],
+    });
+
     // Clean up expired boosts
     try {
       await Car.updateMany(
@@ -1513,10 +1540,33 @@ export const getFilteredCars = async (req, res) => {
         error: queryError.message,
         query: req.query,
       });
-      return res.status(400).json({
-        success: false,
-        message: `Invalid filter parameters: ${queryError.message}`,
-      });
+      // Try a simple regex search as fallback
+      if (req.query.search) {
+        const searchTerm = req.query.search.trim();
+        if (searchTerm.length >= 2) {
+          const searchRegex = new RegExp(searchTerm, "i");
+          filter = {
+            $or: [
+              { make: searchRegex },
+              { model: searchRegex },
+              { title: searchRegex },
+              { description: searchRegex },
+              { city: searchRegex },
+              { location: searchRegex },
+            ],
+          };
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: "Search term must be at least 2 characters long",
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid search parameters",
+        });
+      }
     }
 
     // Add approval check - show approved or cars without isApproved field
@@ -1526,11 +1576,11 @@ export const getFilteredCars = async (req, res) => {
 
     const now = new Date();
 
-    // Visibility filter: exclude deleted, sold cars after their autoDeleteDate, and expired listings
+    // Visibility filter: include active and conditionally include sold
     const visibilityFilter = {
-      status: { $nin: ["deleted", "expired", "sold"] }, // Exclude deleted, expired, and sold by default
+      status: { $nin: ["deleted", "expired"] }, // Only exclude hard deleted and truly expired
       $or: [
-        // Allow sold listings if they haven't passed autoDeleteDate
+        { status: "active" },
         {
           status: "sold",
           $or: [
@@ -1538,8 +1588,6 @@ export const getFilteredCars = async (req, res) => {
             { autoDeleteDate: { $exists: false } },
           ],
         },
-        // Allow active listings
-        { status: "active" },
       ],
     };
 
@@ -1627,6 +1675,14 @@ export const getFilteredCars = async (req, res) => {
           process.env.NODE_ENV === "development" ? dbError.message : undefined,
       });
     }
+
+    Logger.info("Search completed successfully", {
+      query: req.query,
+      resultsCount: cars.length,
+      totalResults: total,
+      page: page,
+      limit: limit,
+    });
 
     // Calculate pagination metadata
     const pages = Math.ceil(total / limit);

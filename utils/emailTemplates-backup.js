@@ -47,6 +47,10 @@ export const getEmailStyles = () => `
       font-weight: 500;
     }
     
+    .content {
+      padding: 40px;
+    }
+    
     .title {
       font-size: 24px;
       font-weight: 700;
@@ -208,7 +212,7 @@ export const getPasswordResetTemplate = (userName, otp, expiryMinutes = 10) => `
         
         <div class="warning-box">
           <div class="warning-text">
-            <strong>Security Notice:</strong> If you didn't request this password reset, Please ignore this email. 
+            <strong>Security Notice:</strong> If you didn't request this password reset, please ignore this email. 
             Your account remains secure.
           </div>
         </div>
@@ -239,6 +243,17 @@ export const getPasswordResetTemplate = (userName, otp, expiryMinutes = 10) => `
   </body>
   </html>
 `;
+
+export default {
+  getEmailStyles,
+  getPasswordResetTemplate,
+  getWelcomeTemplate,
+  getEmailVerificationTemplate,
+  getCarApprovedTemplate,
+  getCarRejectedTemplate,
+  getAccountDeletionApprovedTemplate,
+  getAccountDeletionRejectedTemplate,
+};
 
 /**
  * Welcome Email Template
@@ -313,6 +328,17 @@ export const getWelcomeTemplate = (userName) => `
   </html>
 `;
 
+export default {
+  getEmailStyles,
+  getPasswordResetTemplate,
+  getWelcomeTemplate,
+  getEmailVerificationTemplate,
+  getCarApprovedTemplate,
+  getCarRejectedTemplate,
+  getAccountDeletionApprovedTemplate,
+  getAccountDeletionRejectedTemplate,
+};
+
 /**
  * Account Verification Email Template
  */
@@ -380,6 +406,17 @@ export const getEmailVerificationTemplate = (userName, verificationLink) => `
   </html>
 `;
 
+export default {
+  getEmailStyles,
+  getPasswordResetTemplate,
+  getWelcomeTemplate,
+  getEmailVerificationTemplate,
+  getCarApprovedTemplate,
+  getCarRejectedTemplate,
+  getAccountDeletionApprovedTemplate,
+  getAccountDeletionRejectedTemplate,
+};
+
 /**
  * Car Listing Approved Template
  */
@@ -427,7 +464,7 @@ export const getCarApprovedTemplate = (userName, carTitle, carId) => `
           <ul style="color: #666; line-height: 1.8;">
             <li>📱 Respond quickly to buyer inquiries</li>
             <li>📸 Add more photos to increase visibility</li>
-            <li>🎎 Consider highlighting your listing</li>
+            <li>💎 Consider highlighting your listing</li>
             <li>📊 Track your listing performance</li>
           </ul>
         </div>
@@ -457,6 +494,17 @@ export const getCarApprovedTemplate = (userName, carTitle, carId) => `
   </body>
   </html>
 `;
+
+export default {
+  getEmailStyles,
+  getPasswordResetTemplate,
+  getWelcomeTemplate,
+  getEmailVerificationTemplate,
+  getCarApprovedTemplate,
+  getCarRejectedTemplate,
+  getAccountDeletionApprovedTemplate,
+  getAccountDeletionRejectedTemplate,
+};
 
 /**
  * Car Listing Rejected Template
@@ -497,7 +545,7 @@ export const getCarRejectedTemplate = (userName, carTitle, rejectionReason) => `
             <div style="background: rgba(255,255,255,0.5); border-radius: 4px; padding: 16px; margin-top: 16px;">
               <strong>Reason:</strong> ${rejectionReason}
             </div>
-              `
+          `
               : ""
           }
           <div style="text-align: center; margin-top: 20px;">
@@ -515,6 +563,7 @@ export const getCarRejectedTemplate = (userName, carTitle, rejectionReason) => `
             <li>📸 Add more high-quality photos</li>
             <li>📝 Provide detailed description</li>
             <li>💰 Set competitive pricing</li>
+            <li>📞 Include contact information</li>
             <li>📋 Ensure all required fields are complete</li>
           </ul>
         </div>
@@ -523,162 +572,6 @@ export const getCarRejectedTemplate = (userName, carTitle, rejectionReason) => `
         
         <p style="font-size: 14px; color: #666;">
           Need help? Our support team is here to assist you with getting your listing approved.
-        </p>
-      </div>
-      
-      <div class="footer">
-        <div class="footer-text">
-          © ${new Date().getFullYear()} SELLO. All rights reserved.
-        </div>
-        <div class="social-links">
-          <a href="#" class="social-link">f</a>
-          <a href="#" class="social-link">t</a>
-          <a href="#" class="social-link">in</a>
-          <a href="#" class="social-link">ig</a>
-        </div>
-        <div style="font-size: 12px; color: #999; margin-top: 20px;">
-          This is an automated message. Please do not reply to this email.
-        </div>
-      </div>
-    </div>
-  </body>
-  </html>
-`;
-
-/**
- * Account Deletion Approved Template
- */
-export const getAccountDeletionApprovedTemplate = (userName) => `
-  <!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Account Deletion Approved - SELLO</title>
-    ${getEmailStyles()}
-  </head>
-  <body>
-    <div class="email-container">
-      <div class="header">
-        <div class="logo">SELLO</div>
-        <div class="tagline">Your Trusted Car Marketplace</div>
-      </div>
-      
-      <div class="content">
-        <h1 class="title">Account Deletion Approved</h1>
-        <p class="subtitle">
-          Hi ${
-            userName || "there"
-          }, your account deletion request has been approved.
-        </p>
-        
-        <div style="background: #fff3cd; border-left: 4px solid #FFA602; padding: 16px 20px; margin: 20px 0; border-radius: 4px;">
-          <div class="warning-text">
-            <strong>Important:</strong> Your account and all associated data will be permanently deleted within 24 hours.
-          </div>
-        </div>
-        
-        <div style="background: #f8f9fa; border-radius: 8px; padding: 24px; margin: 30px 0;">
-          <h3 style="color: #FFA602; margin-bottom: 16px;">What This Means</h3>
-          <ul style="color: #666; line-height: 1.8;">
-            <li>🚗 Your profile information will be permanently deleted</li>
-            <li>🚗 All your car listings will be removed</li>
-            <li>🚗 Your chat history will be deleted</li>
-            <li>🚗 Your saved searches will be cleared</li>
-            <li>🚗 You will no longer be able to access your account</li>
-          </ul>
-        </div>
-        
-        <div class="divider"></div>
-        
-        <p style="font-size: 14px; color: #666;">
-          If you did not request this deletion, please contact our support team immediately at 
-          <a href="mailto:support@sello.com" style="color: #FFA602;">support@sello.com</a>
-        </p>
-      </div>
-      
-      <div class="footer">
-        <div class="footer-text">
-          © ${new Date().getFullYear()} SELLO. All rights reserved.
-        </div>
-        <div class="social-links">
-          <a href="#" class="social-link">f</a>
-          <a href="#" class="social-link">t</a>
-          <a href="#" class="social-link">in</a>
-          <a href="#" class="social-link">ig</a>
-        </div>
-        <div style="font-size: 12px; color: #999; margin-top: 20px;">
-          This is an automated message. Please do not reply to this email.
-        </div>
-      </div>
-    </div>
-  </body>
-  </html>
-`;
-
-/**
- * Account Deletion Rejected Template
- */
-export const getAccountDeletionRejectedTemplate = (userName, reviewNotes) => `
-  <!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Account Deletion Request Rejected - SELLO</title>
-    ${getEmailStyles()}
-  </head>
-  <body>
-    <div class="email-container">
-      <div class="header">
-        <div class="logo">SELLO</div>
-        <div class="tagline">Your Trusted Car Marketplace</div>
-      </div>
-      
-      <div class="content">
-        <h1 class="title">Account Deletion Request Rejected</h1>
-        <p class="subtitle">
-          Hi ${
-            userName || "there"
-          }, your account deletion request has been reviewed and rejected.
-        </p>
-        
-        ${
-          reviewNotes
-            ? `
-        <div style="background: rgba(255,255,255,0.5); border-radius: 4px; padding: 16px; margin-top: 16px;">
-          <h3 style="color: #FFA602; margin-bottom: 16px;">Reason for Rejection</h3>
-          <p style="color: #666; line-height: 1.5;">
-            ${reviewNotes}
-          </p>
-        </div>
-        `
-            : ""
-        }
-        
-        <div style="background: #f8f9fa; border-radius: 8px; padding: 24px; margin: 30px 0;">
-          <h3 style="color: #FFA602; margin-bottom: 16px;">What You Can Do</h3>
-          <ul style="color: #666; line-height: 1.8;">
-            <li>📝 Review the reason provided above</li>
-            <li>🔄 Submit a new deletion request if needed</li>
-            <li>💬 Contact our support team if you have questions</li>
-            <li>📧 Update any account information that may have caused concerns</li>
-          </ul>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${
-            process.env.CLIENT_URL || "https://sello.com"
-          }/profile" class="button">
-            Go to Your Profile
-          </a>
-        </div>
-        
-        <div class="divider"></div>
-        
-        <p style="font-size: 14px; color: #666;">
-          If you believe this decision was made in error, please contact our support team at 
-          <a href="mailto:support@sello.com" style="color: #FFA602;">support@sello.com</a>
         </p>
       </div>
       

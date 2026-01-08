@@ -31,6 +31,7 @@ import savedSearchRouter from "../routes/savedSearchRoutes.js";
 import priceRouter from "../routes/priceRoutes.js";
 import seoRouter from "../routes/seoRoutes.js";
 import accountDeletionRouter from "../routes/accountDeletionRoutes.js";
+import mapsRouter from "../routes/mapsRoutes.js";
 
 class RouteRegistry {
   constructor() {
@@ -101,6 +102,7 @@ class RouteRegistry {
 
     // Utilities
     this.register("/api/upload", uploadRouter, "File Upload");
+    this.register("/api/maps", mapsRouter, "Google Maps Proxy");
 
     // SEO routes (must be after API routes to avoid conflicts)
     this.register("/", seoRouter, "SEO", true); // Root level

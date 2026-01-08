@@ -22,7 +22,7 @@ export const getChatbotConfig = async (req, res) => {
         // Placeholder configuration
         const config = {
             enabled: true,
-            welcomeMessage: "Welcome to SELLO! How can I help you today?",
+            welcomeMessage: "Welcome to SELLO! How can we help you today?",
             autoResponse: true,
             workingHours: {
                 enabled: false,
@@ -31,9 +31,9 @@ export const getChatbotConfig = async (req, res) => {
                 timezone: "UTC"
             },
             responses: {
-                greeting: "Hello! Welcome to SELLO. I'm here to help you find the perfect car.",
-                help: "I can help you with car listings, pricing, and general inquiries.",
-                default: "I'm sorry, I didn't understand that. Could you please rephrase?"
+                greeting: "Hello! Welcome to SELLO. How can we assist you today?",
+                help: "We can help you with car listings, pricing, and general inquiries.",
+                default: "Could you please rephrase your request? An agent will be with you shortly."
             }
         };
 
@@ -70,7 +70,7 @@ export const updateChatbotConfig = async (req, res) => {
         // For now, just return success
         const config = {
             enabled: enabled !== undefined ? enabled : true,
-            welcomeMessage: welcomeMessage || "Welcome to SELLO! How can I help you today?",
+            welcomeMessage: welcomeMessage || "Welcome to SELLO! How can we help you today?",
             autoResponse: autoResponse !== undefined ? autoResponse : true,
             workingHours: workingHours || {
                 enabled: false,
@@ -79,9 +79,9 @@ export const updateChatbotConfig = async (req, res) => {
                 timezone: "UTC"
             },
             responses: responses || {
-                greeting: "Hello! Welcome to SELLO. I'm here to help you find the perfect car.",
-                help: "I can help you with car listings, pricing, and general inquiries.",
-                default: "I'm sorry, I didn't understand that. Could you please rephrase?"
+                greeting: "Hello! Welcome to SELLO. How can we assist you today?",
+                help: "We can help you with car listings, pricing, and general inquiries.",
+                default: "An agent will be with you shortly. How can we help you today?"
             },
             updatedAt: new Date(),
             updatedBy: req.user._id

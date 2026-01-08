@@ -38,7 +38,7 @@ export const createSupportChat = async (req, res) => {
           error: "No admin user found",
         });
       }
-      console.log("Found admin user:", admin._id, admin.name);
+      // Found admin user successfully
     } catch (dbError) {
       console.error("Database error finding admin user:", dbError);
       return res.status(500).json({
@@ -56,13 +56,7 @@ export const createSupportChat = async (req, res) => {
       status: "open",
     });
 
-    console.log(
-      "Looking for existing chat between user:",
-      req.user._id,
-      "and admin:",
-      admin._id
-    );
-    console.log("Found existing chat:", existingChat?._id);
+    // Looking for existing chat between user and admin
 
     if (existingChat) {
       // Add message to existing chat
@@ -88,7 +82,7 @@ export const createSupportChat = async (req, res) => {
 
       await existingChat.save();
 
-      // Try chatbot response
+      /* Chatbot disabled per user request
       try {
         const { generateChatbotResponse } = await import("../utils/chatbot.js");
         const chatbotResponse = await generateChatbotResponse(
@@ -121,6 +115,7 @@ export const createSupportChat = async (req, res) => {
       } catch (botError) {
         console.error("Chatbot error:", botError);
       }
+      */
 
       // Convert Map to object for JSON serialization
       const chatData = existingChat.toObject();
@@ -440,10 +435,7 @@ export const sendSupportMessage = async (req, res) => {
     // Emit user message via socket if available
     const io = req.app.get("io");
     if (io) {
-      console.log(
-        `Emitting message to chat:${chatId}, participants:`,
-        chat.participants
-      );
+      // Emitting message via socket
 
       // Emit to the specific chat room (for users who have joined)
       io.to(`chat:${chatId}`).emit("new-message", {
@@ -460,7 +452,7 @@ export const sendSupportMessage = async (req, res) => {
         userName: req.user.name,
       });
     } else {
-      console.log("Socket.io not available for message emission");
+      // Socket.io not available for message emission
     }
 
     return res.status(201).json({
@@ -483,13 +475,7 @@ export const sendSupportMessage = async (req, res) => {
  */
 export const getAllSupportChats = async (req, res) => {
   try {
-    console.log(
-      "getAllSupportChats called by admin:",
-      req.user._id,
-      req.user.name
-    );
-    console.log("Admin permissions:", req.user.permissions);
-    console.log("Admin role:", req.user.role);
+    // Getting all support chats for admin
 
     if (req.user.role !== "admin") {
       return res.status(403).json({
@@ -507,9 +493,7 @@ export const getAllSupportChats = async (req, res) => {
     if (status) query.status = status;
     if (priority) query.priority = priority;
 
-    console.log("Admin chat query:", query);
-    const totalChats = await Chat.countDocuments(query);
-    console.log("Total support chats found:", totalChats);
+    // Querying support chats
 
     let chats = await Chat.find(query)
       .populate("participants", "name email avatar role")
@@ -517,33 +501,19 @@ export const getAllSupportChats = async (req, res) => {
       .limit(limit)
       .sort({ lastMessageAt: -1 });
 
-    console.log("Raw chats found:", chats.length);
-    console.log(
-      "First chat data sample:",
-      chats[0]
-        ? {
-            _id: chats[0]._id,
-            participants: chats[0].participants,
-            lastMessage: chats[0].lastMessage,
-            chatType: chats[0].chatType,
-          }
-        : "No chats found"
-    );
+    // Processing found chats
 
     // Enhance chat data with user information for better frontend handling
     const enhancedChats = chats.map((chat) => {
       const chatObj = chat.toObject();
 
-      // Debug: Log participant data
-      console.log(
-        `Chat ${chatObj._id} participants:`,
-        chatObj.participants.map((p) => ({
-          id: p._id,
-          name: p.name,
-          role: p.role,
-          email: p.email,
-        }))
-      );
+      // Processing participant data
+      chatObj.participants = chatObj.participants.map((p) => ({
+        id: p._id,
+        name: p.name,
+        role: p.role,
+        email: p.email,
+      }));
 
       // Simple approach: Find the user who is NOT the current admin
       let userParticipant = null;
@@ -567,14 +537,9 @@ export const getAllSupportChats = async (req, res) => {
 
       // Add user field for easier frontend access
       chatObj.user = userParticipant;
-      chatObj.customerName = userParticipant?.name || "Unknown User";
+      chatObj.customerName = userParticipant?.name || "User";
 
-      console.log(`Final result for chat ${chatObj._id}:`, {
-        userName: chatObj.user?.name,
-        customerName: chatObj.customerName,
-        userRole: chatObj.user?.role,
-      });
-
+      // Final chat processing
       return chatObj;
     });
 
@@ -989,7 +954,7 @@ export const getSupportChatMessagesAdmin = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Messages retrieved successfully.",
-      data: { messages },
+      data: messages,
     });
   } catch (error) {
     console.error("Get Support Chat Messages Admin Error:", error.message);

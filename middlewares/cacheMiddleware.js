@@ -61,8 +61,8 @@ export const cache = (ttl = 3600, keyGenerator = null) => {
  * Invalidate cache by pattern
  */
 export const invalidateCache = async (pattern) => {
-  if (redis.isAvailable()) {
-    await redis.delPattern(pattern);
+  if (dbCache.isAvailable()) {
+    await dbCache.delPattern(pattern);
   }
 };
 

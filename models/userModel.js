@@ -307,4 +307,18 @@ userSchema.index({ "subscription.isActive": 1, "subscription.endDate": 1 }); // 
 
 const User = mongoose.model("User", userSchema);
 
+// Static method to find and delete user in one operation
+User.findByIdAndDelete = async function (userId) {
+  try {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+    await this.deleteOne({ _id: userId });
+    return user;
+  } catch (error) {
+    throw error;
+  }
+};
+
 export default User;

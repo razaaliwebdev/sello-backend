@@ -40,11 +40,17 @@ export const initializeSocket = (server) => {
     },
     transports: ["websocket", "polling"],
     allowEIO3: true,
+    pingTimeout: 60000, // 60 seconds
+    pingInterval: 25000, // 25 seconds
+    upgradeTimeout: 30000, // 30 seconds
+    maxHttpBufferSize: 1e6, // 1MB
+    compression: true,
   });
 
-  // Authentication middleware for Socket.io
+  // Enhanced error handling for connection stability
   io.use(async (socket, next) => {
     try {
+      // Authentication middleware for Socket.io
       const token =
         socket.handshake.auth?.token ||
         socket.handshake.headers?.authorization?.split(" ")[1] ||
@@ -76,11 +82,35 @@ export const initializeSocket = (server) => {
       }
     } catch (error) {
       Logger.error("Socket auth error", error, { socketId: socket.id });
-      next(new Error("Authentication error: " + error.message));
+      return next(new Error("Authentication error: " + error.message));
     }
   });
 
+  // Enhanced connection handling with error recovery
   io.on("connection", (socket) => {
+    // Set connection timeout and error handling
+    socket.conn.on("error", (err) => {
+      Logger.error("Socket connection error", err, {
+        socketId: socket.id,
+        userId: socket.userId,
+      });
+
+      // Don't immediately disconnect on first error
+      if (err.code === "ECONNRESET" || err.code === "ECONNREFUSED") {
+        Logger.warn("Connection reset detected, attempting graceful handling", {
+          socketId: socket.id,
+          errorCode: err.code,
+        });
+
+        // Graceful disconnect after a short delay
+        setTimeout(() => {
+          socket.disconnect(true);
+        }, 1000);
+      } else {
+        socket.disconnect(true);
+      }
+    });
+
     Logger.info(`User connected via socket`, {
       userId: socket.userId,
       socketId: socket.id,
@@ -512,6 +542,7 @@ export const initializeSocket = (server) => {
 
           // Try chatbot response only for support chats (not car chats)
           // Don't trigger chatbot if admin is responding
+          /* Chatbot disabled per user request
           if (socket.user.role !== "admin" && chat.chatType === "support") {
             setTimeout(async () => {
               try {
@@ -545,7 +576,7 @@ export const initializeSocket = (server) => {
                 console.error("Chatbot error:", error);
               }
             }, 1000); // 1 second delay for bot response
-          } else if (socket.user.role === "admin") {
+          } else */ if (socket.user.role === "admin") {
             // Admin message - update unread count for user
             chat.participants.forEach((participantId) => {
               if (participantId.toString() !== socket.userId) {

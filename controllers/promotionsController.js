@@ -617,9 +617,7 @@ export const getActivePromotions = async (req, res) => {
  */
 const sendPromotionNotifications = async (promotion, adminUser) => {
   try {
-    console.log(
-      `[Promotion] Starting notification process for promotion: ${promotion.title}`
-    );
+    // Starting notification process for promotion
 
     // Get target users based on promotion targetAudience
     let targetUsers = [];
@@ -647,14 +645,10 @@ const sendPromotionNotifications = async (promotion, adminUser) => {
       .select("_id email name verified status")
       .limit(1000); // Limit to prevent overwhelming
 
-    console.log(
-      `[Promotion] Found ${targetUsers.length} users to notify for target audience: ${promotion.targetAudience}`
-    );
+    // Found users to notify for target audience
 
     if (targetUsers.length === 0) {
-      console.log(
-        `[Promotion] No users found for target audience: ${promotion.targetAudience}`
-      );
+      // No users found for target audience
       return;
     }
 
@@ -692,15 +686,11 @@ const sendPromotionNotifications = async (promotion, adminUser) => {
 
     const notifications = await Promise.all(notificationPromises);
     const successfulNotifications = notifications.filter((n) => n !== null);
-    console.log(
-      `[Promotion] Created ${successfulNotifications.length} in-app notifications`
-    );
+    // Created in-app notifications
 
     // Send email notifications if enabled
     if (process.env.ENABLE_EMAIL_NOTIFICATIONS === "true") {
-      console.log(
-        `[Promotion] Sending email notifications to ${targetUsers.length} users`
-      );
+      // Sending email notifications to users
 
       const emailPromises = targetUsers.map(async (user) => {
         if (!user.email || !user.verified) {
@@ -793,7 +783,7 @@ const sendPromotionNotifications = async (promotion, adminUser) => {
           `;
 
           await sendEmail(user.email, subject, html);
-          console.log(`[Promotion] Email sent to: ${user.email}`);
+          // Email sent successfully
           return { success: true, email: user.email };
         } catch (emailError) {
           console.error(
@@ -810,13 +800,9 @@ const sendPromotionNotifications = async (promotion, adminUser) => {
 
       const emailResults = await Promise.all(emailPromises);
       const successfulEmails = emailResults.filter((r) => r && r.success);
-      console.log(
-        `[Promotion] Sent ${successfulEmails.length} emails successfully`
-      );
+      // Sent emails successfully
     } else {
-      console.log(
-        `[Promotion] Email notifications disabled (ENABLE_EMAIL_NOTIFICATIONS != 'true')`
-      );
+      // Email notifications disabled
     }
 
     // Emit real-time notifications via socket.io
@@ -849,17 +835,13 @@ const sendPromotionNotifications = async (promotion, adminUser) => {
           io.to("role:individual").emit("new-notification", socketData);
         }
 
-        console.log(`[Promotion] Real-time notifications sent via socket.io`);
+        // Real-time notifications sent via socket.io
       }
     } catch (socketError) {
       console.error(`[Promotion] Socket.io error:`, socketError.message);
     }
 
-    console.log(
-      `[Promotion] Notification process completed: ${
-        successfulNotifications.length
-      } in-app + ${successfulEmails?.length || 0} emails`
-    );
+    // Notification process completed
   } catch (error) {
     console.error("[Promotion] Error in sendPromotionNotifications:", error);
   }

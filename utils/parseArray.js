@@ -52,15 +52,22 @@ export const buildCarQuery = (query) => {
     throw new Error("Invalid query parameters");
   }
 
-  // Keyword/text search - use MongoDB text search for better performance
+  // Keyword/text search
+  let searchTerm = null;
   if (query.search || query.keyword || query.q) {
-    const searchTerm = (query.search || query.keyword || query.q).trim();
+    searchTerm = (query.search || query.keyword || query.q).trim();
     if (searchTerm && searchTerm.length >= 2) {
-      // Minimum 2 characters for search
-      // Use MongoDB text search (requires text index on title, make, model, description)
-      // This is much faster than regex queries, especially on large datasets
-      filter.$text = { $search: searchTerm };
-    } else if (searchTerm.length < 2) {
+      const searchRegex = new RegExp(searchTerm, "i"); // Case-insensitive
+      filter.$or = [
+        { make: searchRegex },
+        { model: searchRegex },
+        { variant: searchRegex },
+        { title: searchRegex },
+        { description: searchRegex },
+        { city: searchRegex },
+        { location: searchRegex },
+      ];
+    } else if (searchTerm && searchTerm.length < 2) {
       throw new Error("Search term must be at least 2 characters long");
     }
   }
